@@ -1,0 +1,304 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rustfmt_check:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  rust_clippy_check_ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      # https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+      - name: Install FFmpegBuildTools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y install autoconf automake build-essential cmake \
+            git-core libass-dev libfreetype6-dev libgnutls28-dev libsdl2-dev \
+            libtool libva-dev libvdpau-dev libvorbis-dev libxcb1-dev \
+            libxcb-shm0-dev libxcb-xfixes0-dev pkg-config texinfo wget yasm \
+            zlib1g-dev nasm libx264-dev libx265-dev libnuma-dev \
+            libvpx-dev libfdk-aac-dev libmp3lame-dev libopus-dev
+
+      - name: Build Linux FFmpeg
+        run: bash utils/linux_ffmpeg.rs
+
+      - run: |
+          export FFMPEG_PKG_CONFIG_PATH=${PWD}/tmp/ffmpeg_build/lib/pkgconfig
+          cargo clippy -- -D warnings
+
+  rust_clippy_check_windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      # Using this since it's used by clang-sys's CI
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "10.0"
+          directory: ${{ github.workspace }}/clang
+
+      - name: Cache vcpkg
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg
+          key: vcpkg-${{ runner.os }}
+
+      - name: Build vcpkg
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/microsoft/vcpkg --depth 1
+          ./vcpkg/bootstrap-vcpkg.bat
+
+      - name: Install vcpkg
+        run: |
+          ./vcpkg/vcpkg.exe install ffmpeg:x64-windows-static-md
+
+      - name: Clippy check
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          LIBCLANG_PATH: ${{ github.workspace }}/clang/lib
+          LLVM_CONFIG_PATH: ${{ github.workspace }}/clang/bin/llvm-config
+        run: cargo clippy --no-default-features --features ffmpeg7,link_vcpkg_ffmpeg -- -D warnings
+
+  build_static_and_test_ubuntu:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ffmpeg-version: ["release/6.0", "release/6.1", "release/7.0"]
+        rust: ["nightly", "1.70.0"]
+        valgrind: ["valgrind", "no valgrind"]
+        include:
+          # Stop running tests on stable rust or FFmpeg 6.0 (due to specific bug of FFmpeg 6.0)
+          # https://github.com/FFmpeg/FFmpeg/commit/c4f35ba8084f254afe1fb05202abfdcfff63b854
+          - rust: "nightly"
+            ffmpeg-version: "release/6.1"
+            should_test: "true"
+          - rust: "nightly"
+            ffmpeg-version: "release/7.0"
+            should_test: "true"
+          - ffmpeg-version: "release/6.0"
+            additional-cargo-flags: "--no-default-features --features ffmpeg6"
+          - ffmpeg-version: "release/6.1"
+            additional-cargo-flags: "--no-default-features --features ffmpeg6"
+        exclude:
+          # Only run valgrind with latest FFmpeg and nightly rust to reduce resource consumption.
+          - valgrind: "valgrind"
+            ffmpeg-version: "release/6.0"
+          - valgrind: "valgrind"
+            ffmpeg-version: "release/6.1"
+          - valgrind: "valgrind"
+            rust: "1.70.0"
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Install valgrind dependencies
+        # On Debian and Ubuntu, libc6-dbg is required for valgrind
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y install libc6-dbg
+          cargo install cargo-valgrind --version 2.0.2
+
+      - name: Cache valgrind
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/valgrind
+          key: valgrind-${{ runner.os }}
+
+      - name: Build valgrind
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone git://sourceware.org/git/valgrind.git --depth 1
+          cd valgrind
+          ./autogen.sh
+          ./configure
+          make -j$(nproc)
+
+      - name: Install valgrind
+        run: |
+          cd valgrind
+          sudo make install
+
+      # https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+      - name: Install FFmpegBuildTools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y install autoconf automake build-essential cmake \
+            git-core libass-dev libfreetype6-dev libgnutls28-dev libsdl2-dev \
+            libtool libva-dev libvdpau-dev libvorbis-dev libxcb1-dev \
+            libxcb-shm0-dev libxcb-xfixes0-dev pkg-config texinfo wget yasm \
+            zlib1g-dev nasm libx264-dev libx265-dev libnuma-dev \
+            libvpx-dev libfdk-aac-dev libmp3lame-dev libopus-dev
+
+      - name: Build Linux FFmpeg
+        run: bash utils/linux_ffmpeg.rs ${{ matrix.ffmpeg-version }}
+
+      - name: Test
+        run: |
+          export FFMPEG_PKG_CONFIG_PATH=${PWD}/tmp/ffmpeg_build/lib/pkgconfig
+          if [ '${{ matrix.should_test }}' == 'true' ]; then
+            if [ '${{ matrix.valgrind }}' == 'valgrind' ]; then
+              cargo valgrind test ${{ matrix.additional-cargo-flags }}
+            else
+              cargo test ${{ matrix.additional-cargo-flags }}
+            fi
+          else
+            cargo test ${{ matrix.additional-cargo-flags }} --no-run
+          fi
+
+  # Cross build on Ubuntu, then send it to Windows machine for CI.
+  build_dynamic_and_test_windows_pre:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+      - name: Install FFmpegBuildTools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y install autoconf automake build-essential cmake \
+            git-core libass-dev libfreetype6-dev libgnutls28-dev libsdl2-dev \
+            libtool libva-dev libvdpau-dev libvorbis-dev libxcb1-dev \
+            libxcb-shm0-dev libxcb-xfixes0-dev pkg-config texinfo wget yasm \
+            zlib1g-dev nasm libx264-dev libx265-dev libnuma-dev \
+            libvpx-dev libfdk-aac-dev libmp3lame-dev libopus-dev
+
+      - name: Install cross deps
+        run: sudo apt-get -y install mingw-w64
+
+      - name: Build FFmpeg
+        run: bash utils/windows_ffmpeg.rs
+
+      - name: Make shared
+        run: |
+          cd ./tmp/ffmpeg_build/lib
+          i686-w64-mingw32-gcc -shared -o libffmpeg.dll \
+            -Wl,--out-implib,libffmpeg.lib \
+            -Wl,--whole-archive *.a -Wl,--no-whole-archive \
+            -lgdi32 \
+            -lpsapi \
+            -lole32 \
+            -lstrmiids \
+            -luuid \
+            -loleaut32 \
+            -lshlwapi \
+            -luser32 \
+            -lws2_32 \
+            -lvfw32 \
+            -luser32 \
+            -lsecur32 \
+            -lbcrypt \
+            -lm \
+            -lpsapi \
+            -ladvapi32 \
+            -lshell32 \
+            -lole32 \
+            -lmfplat \
+            -static-libgcc \
+            -static-libstdc++
+
+      - name: Upload Cross Compiled FFmpeg for Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross_ffmpeg
+          path: tmp/ffmpeg_build/
+
+  build_dynamic_and_test_windows:
+    strategy:
+      matrix:
+        rust: ["nightly", "1.70.0"]
+      fail-fast: false
+    runs-on: windows-latest
+    needs: build_dynamic_and_test_windows_pre
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: i686-pc-windows-msvc
+          toolchain: ${{ matrix.rust }}
+
+      - name: Download Cross Compiled FFmpeg for Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: cross_ffmpeg
+          path: ${{ github.workspace }}/ffmpeg_prebuilt_cross
+
+      # Using this since it's used by clang-sys's CI
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "10.0"
+          directory: ${{ github.workspace }}/clang
+
+      # `--tests` to disable glfw-sys building on windows_x86(which is currently not working)
+      - env:
+          FFMPEG_INCLUDE_DIR: ${{ github.workspace }}/ffmpeg_prebuilt_cross/include
+          FFMPEG_DLL_PATH: ${{ github.workspace }}/ffmpeg_prebuilt_cross/lib/libffmpeg.dll
+          LIBCLANG_PATH: ${{ github.workspace }}/clang/lib
+          LLVM_CONFIG_PATH: ${{ github.workspace }}/clang/bin/llvm-config
+        run: |
+          copy ${{ github.workspace }}/ffmpeg_prebuilt_cross/lib/libffmpeg.dll .
+          cargo test --tests --target i686-pc-windows-msvc -- --skip transcode
+
+  # Check if correct documentation can be generated by docs.rs
+  docs_rs_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      # https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+      - name: Install FFmpegBuildTools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y install autoconf automake build-essential cmake \
+            git-core libass-dev libfreetype6-dev libgnutls28-dev libsdl2-dev \
+            libtool libva-dev libvdpau-dev libvorbis-dev libxcb1-dev \
+            libxcb-shm0-dev libxcb-xfixes0-dev pkg-config texinfo wget yasm \
+            zlib1g-dev nasm libx264-dev libx265-dev libnuma-dev \
+            libvpx-dev libfdk-aac-dev libmp3lame-dev libopus-dev
+
+      - name: Set env
+        run: echo "DOCS_RS=1" >> $GITHUB_ENV
+      - name: Document Generation
+        run: cargo doc
