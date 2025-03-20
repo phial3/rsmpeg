@@ -312,6 +312,53 @@ impl AVFormatContextOutput {
         Ok(output_format_context)
     }
 
+    pub fn create2(
+        filename: &CStr,
+        format: Option<&CStr>,
+        options: &mut Option<AVDictionary>,
+        io_context: Option<AVIOContextContainer>,
+    ) -> Result<Self> {
+        let mut output_format_context = ptr::null_mut();
+        let format_name = format
+            .map(|fmt_name| fmt_name.as_ptr())
+            .unwrap_or_else(ptr::null);
+
+        // Alloc the context
+        unsafe {
+            ffi::avformat_alloc_output_context2(
+                &mut output_format_context,
+                ptr::null_mut(),
+                format_name,
+                filename.as_ptr(),
+            )
+        }
+        .upgrade()?;
+
+        let mut output_format_context =
+            unsafe { Self::from_raw(NonNull::new(output_format_context).unwrap()) };
+
+        if output_format_context.oformat().flags & ffi::AVFMT_NOFILE as i32 == 0 {
+            // If user provides us an `AVIOCustomContext`, use it, or we create a default one.
+            let mut io_context = match io_context {
+                Some(x) => x,
+                None => AVIOContextContainer::Url(AVIOContextURL::open2(
+                    filename,
+                    ffi::AVIO_FLAG_WRITE,
+                    options,
+                )?),
+            };
+            unsafe {
+                output_format_context.deref_mut().pb = match &mut io_context {
+                    AVIOContextContainer::Url(ctx) => ctx.as_mut_ptr(),
+                    AVIOContextContainer::Custom(ctx) => ctx.as_mut_ptr(),
+                };
+            }
+            output_format_context.io_context = Some(io_context);
+        }
+
+        Ok(output_format_context)
+    }
+
     /// Allocate the stream private data and write the stream header to an
     /// output media file.
     ///
