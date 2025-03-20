@@ -5,7 +5,7 @@ use std::{
     slice,
 };
 
-use crate::{avutil::AVMem, error::*, ffi, shared::*};
+use crate::{avutil::{AVMem, AVDictionary}, error::*, ffi, shared::*};
 
 wrap!(AVIOContext: ffi::AVIOContext);
 
@@ -32,6 +32,36 @@ impl AVIOContextURL {
     pub fn open(url: &CStr, flags: u32) -> Result<Self> {
         let mut io_context = ptr::null_mut();
         unsafe { ffi::avio_open(&mut io_context, url.as_ptr(), flags as _) }.upgrade()?;
+        Ok(Self(unsafe {
+            AVIOContext::from_raw(NonNull::new(io_context).unwrap())
+        }))
+    }
+
+    pub fn open2(url: &CStr, flags: u32, options: &mut Option<AVDictionary>) -> Result<Self> {
+        let mut io_context = ptr::null_mut();
+        let mut options_ptr = options
+            .as_mut()
+            .map(|x| x.as_mut_ptr())
+            .unwrap_or_else(ptr::null_mut);
+
+        unsafe {
+            ffi::avio_open2(
+                &mut io_context,
+                url.as_ptr(),
+                flags as _,
+                ptr::null(),
+                &mut options_ptr,
+            )
+            .upgrade()?
+        };
+
+        // Forget the old options since it's ownership is transferred.
+        let mut new_options = options_ptr
+            .upgrade()
+            .map(|x| unsafe { AVDictionary::from_raw(x) });
+        std::mem::swap(options, &mut new_options);
+        std::mem::forget(new_options);
+
         Ok(Self(unsafe {
             AVIOContext::from_raw(NonNull::new(io_context).unwrap())
         }))
