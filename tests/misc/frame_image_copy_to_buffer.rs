@@ -48,12 +48,13 @@ fn get_libav_allocated_frame(filter_spec: &CStr) -> Result<AVFrame> {
     let mut buffersink_ctx = filter_graph
         .alloc_filter_context(&buffersink_filter, c"out")
         .context("could not allocate buffersink context")?;
-    // FFmpeg 7.1 renamed the buffersink option `pix_fmts` (int-list binary
+    // FFmpeg 8 renamed the buffersink option `pix_fmts` (int-list binary
     // option) to `pixel_formats` (array-type option), and the deprecated old
-    // one was removed in FFmpeg 8+.
-    #[cfg(not(feature = "ffmpeg7_1"))]
+    // one was removed in FFmpeg 8+. (The rename commit landed after the 7.1
+    // branch point.)
+    #[cfg(not(feature = "ffmpeg8"))]
     buffersink_ctx.opt_set_bin(c"pix_fmts", &ffi::AV_PIX_FMT_RGB24)?;
-    #[cfg(feature = "ffmpeg7_1")]
+    #[cfg(feature = "ffmpeg8")]
     buffersink_ctx.opt_set_array(
         c"pixel_formats",
         0,

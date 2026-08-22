@@ -197,14 +197,15 @@ fn init_filter<'graph>(
             .alloc_filter_context(&buffersink, c"out")
             .context("Cannot create buffer sink")?;
 
-        // FFmpeg 7.1 renamed the buffersink options from int-list binary
+        // FFmpeg 8 renamed the buffersink options from int-list binary
         // options (`pix_fmts`) to array-type options (`pixel_formats`), and
         // the deprecated old ones were removed in FFmpeg 8+.
-        #[cfg(not(feature = "ffmpeg7_1"))]
+        // (The rename commit landed after the 7.1 branch point.)
+        #[cfg(not(feature = "ffmpeg8"))]
         buffer_sink_context
             .opt_set_bin(c"pix_fmts", &enc_ctx.pix_fmt)
             .context("Cannot set output pixel format")?;
-        #[cfg(feature = "ffmpeg7_1")]
+        #[cfg(feature = "ffmpeg8")]
         buffer_sink_context
             .opt_set_array(
                 c"pixel_formats",
@@ -250,16 +251,17 @@ fn init_filter<'graph>(
         let mut buffersink_ctx = filter_graph
             .alloc_filter_context(&buffersink, c"out")
             .context("Cannot create audio buffer sink")?;
-        // FFmpeg 7.1 renamed the abuffersink options from int-list binary
+        // FFmpeg 8 renamed the abuffersink options from int-list binary
         // options (`sample_fmts`, `sample_rates`) and the string option
         // (`ch_layouts`) to array-type options (`sample_formats`,
         // `samplerates`, `channel_layouts`), and the deprecated old ones were
-        // removed in FFmpeg 8+.
-        #[cfg(not(feature = "ffmpeg7_1"))]
+        // removed in FFmpeg 8+. (The rename commit landed after the 7.1
+        // branch point.)
+        #[cfg(not(feature = "ffmpeg8"))]
         buffersink_ctx
             .opt_set_bin(c"sample_fmts", &enc_ctx.sample_fmt)
             .context("Cannot set output sample format")?;
-        #[cfg(feature = "ffmpeg7_1")]
+        #[cfg(feature = "ffmpeg8")]
         buffersink_ctx
             .opt_set_array(
                 c"sample_formats",
@@ -268,11 +270,11 @@ fn init_filter<'graph>(
                 ffi::AV_OPT_TYPE_SAMPLE_FMT,
             )
             .context("Cannot set output sample format")?;
-        #[cfg(not(feature = "ffmpeg7_1"))]
+        #[cfg(not(feature = "ffmpeg8"))]
         buffersink_ctx
             .opt_set(c"ch_layouts", &enc_ctx.ch_layout().describe().unwrap())
             .context("Cannot set output channel layout")?;
-        #[cfg(feature = "ffmpeg7_1")]
+        #[cfg(feature = "ffmpeg8")]
         buffersink_ctx
             .opt_set_array(
                 c"channel_layouts",
@@ -281,11 +283,11 @@ fn init_filter<'graph>(
                 ffi::AV_OPT_TYPE_CHLAYOUT,
             )
             .context("Cannot set output channel layout")?;
-        #[cfg(not(feature = "ffmpeg7_1"))]
+        #[cfg(not(feature = "ffmpeg8"))]
         buffersink_ctx
             .opt_set_bin(c"sample_rates", &enc_ctx.sample_rate)
             .context("Cannot set output sample rate")?;
-        #[cfg(feature = "ffmpeg7_1")]
+        #[cfg(feature = "ffmpeg8")]
         buffersink_ctx
             .opt_set_array(
                 c"samplerates",

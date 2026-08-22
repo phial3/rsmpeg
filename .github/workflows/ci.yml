@@ -77,9 +77,13 @@ jobs:
 
       - name: Build vcpkg
         if: steps.cache.outputs.cache-hit != 'true'
+        # Retry to mitigate transient GitHub network failures when cloning
+        # vcpkg or downloading the vcpkg.exe tool during bootstrap.
         run: |
-          git clone https://github.com/microsoft/vcpkg --depth 1
-          ./vcpkg/bootstrap-vcpkg.bat
+          git clone https://github.com/microsoft/vcpkg --depth 1 ||
+            (rm -rf vcpkg && git clone https://github.com/microsoft/vcpkg --depth 1)
+          ./vcpkg/bootstrap-vcpkg.bat ||
+            ./vcpkg/bootstrap-vcpkg.bat
 
       - name: Install vcpkg
         run: |
@@ -234,13 +238,22 @@ jobs:
       - name: Make shared
         run: |
           cd ./tmp/ffmpeg_build/lib
-          i686-w64-mingw32-gcc -shared -o libffmpeg.dll \
+          # Use the g++ driver: FFmpeg 9 ships `vsrc_gfxcapture_winrt.cpp`
+          # (C++) in libavfilter, which needs the C++ runtime linked in.
+          # -lcrypt32/-lncrypt: FFmpeg 9's tls_schannel self-signed
+          # certificate support requires them.
+          # --allow-multiple-definition: FFmpeg 9's libswscale/framepool.c
+          # directly includes libavfilter/framepool.c, so both archives define
+          # the same ff_frame_pool_* symbols under --whole-archive.
+          i686-w64-mingw32-g++ -shared -o libffmpeg.dll \
             -Wl,--out-implib,libffmpeg.lib \
             -Wl,--whole-archive *.a -Wl,--no-whole-archive \
             -Wl,--allow-multiple-definition \
             -lgdi32 \
             -lpsapi \
             -lole32 \
+            -lcrypt32 \
+            -lncrypt \
             -lstrmiids \
             -luuid \
             -loleaut32 \
