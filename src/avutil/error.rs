@@ -1,6 +1,6 @@
 use crate::ffi;
 use rusty_ffmpeg::ffi::AV_ERROR_MAX_STRING_SIZE;
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 
 /// Return a description of the AVERROR code errnum.
 ///

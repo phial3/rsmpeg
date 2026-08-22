@@ -48,7 +48,18 @@ fn get_libav_allocated_frame(filter_spec: &CStr) -> Result<AVFrame> {
     let mut buffersink_ctx = filter_graph
         .alloc_filter_context(&buffersink_filter, c"out")
         .context("could not allocate buffersink context")?;
+    // FFmpeg 7.1 renamed the buffersink option `pix_fmts` (int-list binary
+    // option) to `pixel_formats` (array-type option), and the deprecated old
+    // one was removed in FFmpeg 8+.
+    #[cfg(not(feature = "ffmpeg7_1"))]
     buffersink_ctx.opt_set_bin(c"pix_fmts", &ffi::AV_PIX_FMT_RGB24)?;
+    #[cfg(feature = "ffmpeg7_1")]
+    buffersink_ctx.opt_set_array(
+        c"pixel_formats",
+        0,
+        Some(&[ffi::AV_PIX_FMT_RGB24]),
+        ffi::AV_OPT_TYPE_PIXEL_FMT,
+    )?;
     buffersink_ctx.init_dict(&mut None)?;
 
     let outputs = AVFilterInOut::new(c"in", &mut testsrc2_ctx, 0);
@@ -87,8 +98,12 @@ fn write_out_rgb24(
 #[test]
 fn test_frame_copy_to_buffer0() {
     frame_copy_to_buffer(c"null", "tests/output/frame_copy_to_buffer/sink.png").unwrap();
-    assert_eq!(
-        fs::read("tests/output/frame_copy_to_buffer/sink.png").unwrap(),
-        fs::read("tests/assets/pics/sink.png").unwrap(),
-    );
+    // Compare decoded pixels instead of raw file bytes: the PNG encoder of the
+    // `image` dev-dependency is not pinned (Cargo.lock is not tracked), so its
+    // output bytes may change between versions while pixels stay identical.
+    let output = image::open("tests/output/frame_copy_to_buffer/sink.png")
+        .unwrap()
+        .to_rgb8();
+    let expect = image::open("tests/assets/pics/sink.png").unwrap().to_rgb8();
+    assert_eq!(output, expect);
 }

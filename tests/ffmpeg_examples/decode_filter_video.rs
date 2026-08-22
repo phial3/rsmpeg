@@ -1,5 +1,5 @@
 //! RIIR: https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rsmpeg::{
     avcodec::AVCodecContext,
     avfilter::{AVFilter, AVFilterGraph, AVFilterInOut},

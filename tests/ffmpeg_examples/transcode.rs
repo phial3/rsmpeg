@@ -1,11 +1,11 @@
 //! RIIR: https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/transcode.c
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use rsmpeg::{
     avcodec::{AVCodec, AVCodecContext},
     avfilter::{AVFilter, AVFilterContextMut, AVFilterGraph, AVFilterInOut},
     avformat::{AVFormatContextInput, AVFormatContextOutput},
     avutil::{
-        av_inv_q, av_rescale_q, get_sample_fmt_name, ra, AVChannelLayout, AVDictionary, AVFrame,
+        AVChannelLayout, AVDictionary, AVFrame, av_inv_q, av_rescale_q, get_sample_fmt_name, ra,
     },
     error::RsmpegError,
     ffi,
@@ -197,8 +197,21 @@ fn init_filter<'graph>(
             .alloc_filter_context(&buffersink, c"out")
             .context("Cannot create buffer sink")?;
 
+        // FFmpeg 7.1 renamed the buffersink options from int-list binary
+        // options (`pix_fmts`) to array-type options (`pixel_formats`), and
+        // the deprecated old ones were removed in FFmpeg 8+.
+        #[cfg(not(feature = "ffmpeg7_1"))]
         buffer_sink_context
             .opt_set_bin(c"pix_fmts", &enc_ctx.pix_fmt)
+            .context("Cannot set output pixel format")?;
+        #[cfg(feature = "ffmpeg7_1")]
+        buffer_sink_context
+            .opt_set_array(
+                c"pixel_formats",
+                0,
+                Some(&[enc_ctx.pix_fmt]),
+                ffi::AV_OPT_TYPE_PIXEL_FMT,
+            )
             .context("Cannot set output pixel format")?;
 
         buffer_sink_context
@@ -237,14 +250,49 @@ fn init_filter<'graph>(
         let mut buffersink_ctx = filter_graph
             .alloc_filter_context(&buffersink, c"out")
             .context("Cannot create audio buffer sink")?;
+        // FFmpeg 7.1 renamed the abuffersink options from int-list binary
+        // options (`sample_fmts`, `sample_rates`) and the string option
+        // (`ch_layouts`) to array-type options (`sample_formats`,
+        // `samplerates`, `channel_layouts`), and the deprecated old ones were
+        // removed in FFmpeg 8+.
+        #[cfg(not(feature = "ffmpeg7_1"))]
         buffersink_ctx
             .opt_set_bin(c"sample_fmts", &enc_ctx.sample_fmt)
             .context("Cannot set output sample format")?;
+        #[cfg(feature = "ffmpeg7_1")]
+        buffersink_ctx
+            .opt_set_array(
+                c"sample_formats",
+                0,
+                Some(&[enc_ctx.sample_fmt]),
+                ffi::AV_OPT_TYPE_SAMPLE_FMT,
+            )
+            .context("Cannot set output sample format")?;
+        #[cfg(not(feature = "ffmpeg7_1"))]
         buffersink_ctx
             .opt_set(c"ch_layouts", &enc_ctx.ch_layout().describe().unwrap())
             .context("Cannot set output channel layout")?;
+        #[cfg(feature = "ffmpeg7_1")]
+        buffersink_ctx
+            .opt_set_array(
+                c"channel_layouts",
+                0,
+                Some(&[enc_ctx.ch_layout().clone().into_inner()]),
+                ffi::AV_OPT_TYPE_CHLAYOUT,
+            )
+            .context("Cannot set output channel layout")?;
+        #[cfg(not(feature = "ffmpeg7_1"))]
         buffersink_ctx
             .opt_set_bin(c"sample_rates", &enc_ctx.sample_rate)
+            .context("Cannot set output sample rate")?;
+        #[cfg(feature = "ffmpeg7_1")]
+        buffersink_ctx
+            .opt_set_array(
+                c"samplerates",
+                0,
+                Some(&[enc_ctx.sample_rate]),
+                ffi::AV_OPT_TYPE_INT,
+            )
             .context("Cannot set output sample rate")?;
 
         // `av_buffersink_set_frame_size` will SIGSEGV even on FFmpeg 7.1, problem persists until
@@ -446,7 +494,7 @@ pub fn transcode(
                 let mut frame = match decode_context.receive_frame() {
                     Ok(frame) => frame,
                     Err(RsmpegError::DecoderDrainError) | Err(RsmpegError::DecoderFlushedError) => {
-                        break
+                        break;
                     }
                     Err(e) => bail!(e),
                 };

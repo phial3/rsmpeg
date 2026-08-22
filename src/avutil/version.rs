@@ -1,7 +1,7 @@
 use crate::ffi;
 
 use std::{
-    ffi::{c_uint, CStr},
+    ffi::{CStr, c_uint},
     fmt::Display,
 };
 

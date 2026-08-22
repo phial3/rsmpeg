@@ -3,8 +3,8 @@ use anyhow::{Context, Result};
 use rsmpeg::{
     avfilter::{AVFilter, AVFilterGraph},
     avutil::{
-        get_bytes_per_sample, get_sample_fmt_name, sample_fmt_is_planar, AVChannelLayout,
-        AVDictionary, AVFrame, AVMD5,
+        AVChannelLayout, AVDictionary, AVFrame, AVMD5, get_bytes_per_sample, get_sample_fmt_name,
+        sample_fmt_is_planar,
     },
     ffi,
 };
