@@ -86,6 +86,10 @@ impl Iterator for AVCodecIter {
     }
 }
 
+// FFmpeg 9 removed the deprecated AVCodec static array fields
+// (supported_framerates, pix_fmts, supported_samplerates, sample_fmts).
+// Use `AVCodecContext::get_supported_config()` (FFmpeg 7.1+) instead.
+#[cfg(not(feature = "ffmpeg9"))]
 impl<'codec> AVCodec {
     /// Return supported framerates of this [`AVCodec`].
     pub fn supported_framerates(&'codec self) -> Option<&'codec [AVRational]> {

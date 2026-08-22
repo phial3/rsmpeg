@@ -62,11 +62,20 @@ fn thumbnail(
         encode_context.set_width(width.unwrap_or(decode_context.width));
         encode_context.set_height(height.unwrap_or(decode_context.height));
         encode_context.set_time_base(av_inv_q(decode_context.framerate));
+        #[cfg(not(feature = "ffmpeg7_1"))]
         encode_context.set_pix_fmt(if let Some(pix_fmts) = encoder.pix_fmts() {
             pix_fmts[0]
         } else {
             decode_context.pix_fmt
         });
+        #[cfg(feature = "ffmpeg7_1")]
+        encode_context.set_pix_fmt(
+            encode_context
+                .get_supported_pix_fmts(None)
+                .ok()
+                .and_then(|fmts| fmts.first().copied())
+                .unwrap_or(decode_context.pix_fmt),
+        );
         encode_context.open(None)?;
 
         encode_context

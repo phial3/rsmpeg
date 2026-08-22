@@ -53,7 +53,16 @@ fn open_output_file(
     // The input file's sample rate is used to avoid a sample rate conversion.
     encode_context.set_ch_layout(AVChannelLayout::from_nb_channels(OUTPUT_CHANNELS).into_inner());
     encode_context.set_sample_rate(decode_context.sample_rate);
+    #[cfg(not(feature = "ffmpeg7_1"))]
     encode_context.set_sample_fmt(encode_codec.sample_fmts().unwrap()[0]);
+    #[cfg(feature = "ffmpeg7_1")]
+    encode_context.set_sample_fmt(
+        encode_context
+            .get_supported_sample_fmts(None)
+            .ok()
+            .and_then(|fmts| fmts.first().copied())
+            .unwrap_or(ffi::AV_SAMPLE_FMT_FLTP),
+    );
     encode_context.set_bit_rate(OUTPUT_BIT_RATE);
 
     // Open the encoder for the audio stream to use it later.
