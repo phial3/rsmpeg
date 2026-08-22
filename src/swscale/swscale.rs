@@ -164,13 +164,24 @@ impl SwsContext {
     }
 }
 
-/// New libswscale API introduced in FFmpeg 7, and recommended since
-/// FFmpeg 9 (which deprecated the classic `sws_getContext()` +
-/// `sws_scale()` workflow).
+/// Modern libswscale API. `sws_scale_frame()` was introduced in FFmpeg 5.0
+/// (libswscale 6.1.100), and became the officially recommended API in
+/// FFmpeg 8.0 (libswscale 8.12.100), which allowed fully dynamic usage
+/// without `sws_init_context()` (deprecated since then) and reclassified
+/// the classic `sws_getContext()` + `sws_scale()` workflow as the
+/// "Legacy (stateful) API".
 ///
 /// Gated behind `ffmpeg8` rather than `ffmpeg7` because `sws_scale_frame()`
 /// crashes on FFmpeg 7.x due to a buffer pool bug, fixed in FFmpeg 8 by
-/// https://github.com/FFmpeg/FFmpeg/commit/6b402cdbf46e4398b3285277f3ff7c3654d57ce6.
+/// <https://github.com/FFmpeg/FFmpeg/commit/6b402cdbf46e4398b3285277f3ff7c3654d57ce6>.
+///
+/// Since
+/// <https://github.com/FFmpeg/FFmpeg/commit/47f89ea88ba1ae9a9ac5b1b9bfa6063dfbd8c73a>
+/// (post-FFmpeg 9.0), libswscale explicitly tracks whether a context was
+/// initialized through the legacy or the modern API, and rejects any mixing
+/// of the two with `AVERROR(EINVAL)`: a context created by [`Self::alloc()`]
+/// must only be used with [`Self::scale_full_frame()`], never with the
+/// legacy `sws_getContext()`/`sws_scale()` family, and vice versa.
 #[cfg(feature = "ffmpeg8")]
 impl SwsContext {
     /// Allocate an uninitialized [`SwsContext`] for use with the modern
@@ -188,9 +199,10 @@ impl SwsContext {
 
     /// Scale the image data of `src` and write the output to `dst`.
     ///
-    /// This is the modern libswscale API (introduced in FFmpeg 7, and the
-    /// recommended way to use libswscale since FFmpeg 9, which deprecated
-    /// the classic `sws_getContext()` + `sws_scale()` workflow).
+    /// This is the modern libswscale API (introduced in FFmpeg 5.0, and the
+    /// officially recommended way to use libswscale since FFmpeg 8.0,
+    /// which deprecated `sws_init_context()` and the classic
+    /// `sws_getContext()` + `sws_scale()` "Legacy (stateful) API").
     ///
     /// It can be used directly on a context created with
     /// [`Self::alloc()`], without setting up any frame properties or
