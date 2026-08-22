@@ -80,7 +80,7 @@ fn _main(file: &CStr, out_dir: &str) -> Result<()> {
         decode_context.width,
         decode_context.height,
         ffi::AV_PIX_FMT_RGB24,
-        ffi::SWS_BILINEAR,
+        ffi::SWS_BILINEAR as u32,
         None,
         None,
         None,

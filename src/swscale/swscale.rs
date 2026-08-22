@@ -13,6 +13,10 @@ impl SwsContext {
     ///
     /// Return `None` when input is invalid. Parameter `flags` can be set to
     /// `rsmpeg::ffi::SWS_FAST_BILINEAR` etc.
+    ///
+    /// Note: since FFmpeg 8, `ffi::SWS_*` constants are typed as
+    /// `ffi::SwsFlags`, whose underlying type is target-dependent (`i32` on
+    /// MSVC, `u32` elsewhere); a plain `as u32` cast works on all platforms.
     #[allow(clippy::too_many_arguments)]
     pub fn get_context(
         src_w: i32,
@@ -59,6 +63,10 @@ impl SwsContext {
     /// are assumed to remain the same.
     ///
     /// Returns `None` when context allocation or initiation failed.
+    ///
+    /// Note: since FFmpeg 8, `ffi::SWS_*` constants are typed as
+    /// `ffi::SwsFlags`, whose underlying type is target-dependent (`i32` on
+    /// MSVC, `u32` elsewhere); a plain `as u32` cast works on all platforms.
     #[allow(clippy::too_many_arguments)]
     pub fn get_cached_context(
         self,
@@ -156,6 +164,52 @@ impl SwsContext {
     }
 }
 
+/// New libswscale API introduced in FFmpeg 7, and recommended since
+/// FFmpeg 9 (which deprecated the classic `sws_getContext()` +
+/// `sws_scale()` workflow).
+///
+/// Gated behind `ffmpeg8` rather than `ffmpeg7` because `sws_scale_frame()`
+/// crashes on FFmpeg 7.x due to a buffer pool bug, fixed in FFmpeg 8 by
+/// https://github.com/FFmpeg/FFmpeg/commit/6b402cdbf46e4398b3285277f3ff7c3654d57ce6.
+#[cfg(feature = "ffmpeg8")]
+impl SwsContext {
+    /// Allocate an uninitialized [`SwsContext`] for use with the modern
+    /// [`Self::scale_full_frame()`] API.
+    ///
+    /// [`Self::scale_full_frame()`] can be called directly on such a context
+    /// in a fully dynamic mode, deriving all parameters from the frame
+    /// properties, without ever calling `sws_init_context()`.
+    ///
+    /// Return `None` on allocation failure.
+    pub fn alloc() -> Option<Self> {
+        let context = unsafe { ffi::sws_alloc_context() };
+        unsafe { context.upgrade().map(|x| Self::from_raw(x)) }
+    }
+
+    /// Scale the image data of `src` and write the output to `dst`.
+    ///
+    /// This is the modern libswscale API (introduced in FFmpeg 7, and the
+    /// recommended way to use libswscale since FFmpeg 9, which deprecated
+    /// the classic `sws_getContext()` + `sws_scale()` workflow).
+    ///
+    /// It can be used directly on a context created with
+    /// [`Self::alloc()`], without setting up any frame properties or
+    /// initializing the context. Such usage is fully dynamic and does not
+    /// require reallocation if the frame properties change.
+    ///
+    /// The `dst` frame must have its format, width and height set; its data
+    /// buffers may either be allocated by the caller or left clear, in
+    /// which case they will be allocated by the scaler.
+    ///
+    /// Return `Ok(())` on success, `Err(_)` with a negative AVERROR code on
+    /// failure.
+    pub fn scale_full_frame(&mut self, dst: &mut AVFrame, src: &AVFrame) -> Result<()> {
+        unsafe { ffi::sws_scale_frame(self.as_mut_ptr(), dst.as_mut_ptr(), src.as_ptr()) }
+            .upgrade()?;
+        Ok(())
+    }
+}
+
 impl Drop for SwsContext {
     fn drop(&mut self) {
         unsafe { ffi::sws_freeContext(self.as_mut_ptr()) }
@@ -176,7 +230,7 @@ mod tests {
             10,
             10,
             AV_PIX_FMT_RGB24,
-            SWS_FULL_CHR_H_INT | SWS_BICUBIC,
+            (SWS_FULL_CHR_H_INT | SWS_BICUBIC) as u32,
             None,
             None,
             Some(&[SWS_PARAM_DEFAULT as f64, SWS_PARAM_DEFAULT as f64]),
@@ -191,7 +245,7 @@ mod tests {
                 10,
                 10,
                 AV_PIX_FMT_RGB24,
-                SWS_FULL_CHR_H_INT | SWS_BICUBIC,
+                (SWS_FULL_CHR_H_INT | SWS_BICUBIC) as u32,
                 None,
                 None,
                 None,
@@ -199,5 +253,37 @@ mod tests {
             .unwrap();
         let new_ptr = context.as_ptr();
         assert_eq!(old_ptr, new_ptr);
+    }
+
+    #[cfg(feature = "ffmpeg8")]
+    #[test]
+    fn test_scale_full_frame() {
+        use crate::avutil::AVImage;
+
+        // Modern dynamic mode: allocate a context and scale frames directly,
+        // deriving all parameters from the frame properties. The source
+        // frame buffers are pre-allocated here, while the destination
+        // buffers are left clear so the scaler allocates them itself.
+        let src_img = AVImage::new(ffi::AV_PIX_FMT_YUV420P, 64, 64, 1).unwrap();
+        let mut src = AVFrame::new();
+        src.data_mut().clone_from(src_img.data());
+        src.linesize_mut().clone_from(src_img.linesizes());
+        src.set_format(ffi::AV_PIX_FMT_YUV420P as i32);
+        src.set_width(64);
+        src.set_height(64);
+
+        let mut dst = AVFrame::new();
+        dst.set_width(32);
+        dst.set_height(32);
+        dst.set_format(ffi::AV_PIX_FMT_RGB24 as i32);
+
+        let mut context = SwsContext::alloc().unwrap();
+        context.scale_full_frame(&mut dst, &src).unwrap();
+
+        assert_eq!(dst.width, 32);
+        assert_eq!(dst.height, 32);
+        assert_eq!(dst.format, ffi::AV_PIX_FMT_RGB24 as i32);
+        assert!(!dst.data[0].is_null());
+        assert!(dst.linesize[0] >= 32 * 3);
     }
 }

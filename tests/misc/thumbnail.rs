@@ -82,6 +82,14 @@ fn thumbnail(
     };
 
     let scaled_cover_packet = {
+        // Since FFmpeg 8, prefer the modern swscale API: allocate a context
+        // and scale frames directly, with all parameters derived from the
+        // frame properties. Older FFmpeg falls back to the classic
+        // sws_getContext() + sws_scale() workflow (`sws_scale_frame()`
+        // crashes on FFmpeg 7.x due to an upstream buffer pool bug).
+        #[cfg(feature = "ffmpeg8")]
+        let mut sws_context = SwsContext::alloc().context("Failed to allocate swscale context.")?;
+        #[cfg(not(feature = "ffmpeg8"))]
         let mut sws_context = SwsContext::get_context(
             decode_context.width,
             decode_context.height,
@@ -89,7 +97,7 @@ fn thumbnail(
             encode_context.width,
             encode_context.height,
             encode_context.pix_fmt,
-            ffi::SWS_FAST_BILINEAR | ffi::SWS_PRINT_INFO,
+            (ffi::SWS_FAST_BILINEAR | ffi::SWS_PRINT_INFO) as u32,
             None,
             None,
             None,
@@ -106,6 +114,9 @@ fn thumbnail(
 
         let mut scaled_cover_frame = AVFrameWithImage::new(image_buffer);
 
+        #[cfg(feature = "ffmpeg8")]
+        sws_context.scale_full_frame(&mut scaled_cover_frame, &cover_frame)?;
+        #[cfg(not(feature = "ffmpeg8"))]
         sws_context.scale_frame(
             &cover_frame,
             0,
