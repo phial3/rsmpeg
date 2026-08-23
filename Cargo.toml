@@ -14,7 +14,7 @@ exclude = ["/.github", "/tests", "/utils"]
 license = "MIT"
 
 [dependencies]
-rusty_ffmpeg = { git = "https://gitee.com/phial3/rusty_ffmpeg.git", branch = "ffmpeg9" }
+rusty_ffmpeg = { git = "https://github.com/phial3/rusty_ffmpeg.git", branch = "ffmpeg9" }
 
 paste = "1.0"
 thiserror = "2.0"
