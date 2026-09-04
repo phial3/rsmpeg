@@ -10,14 +10,11 @@ wrap!(AVCodecParserContext: ffi::AVCodecParserContext);
 impl AVCodecParserContext {
     /// Allocate a [`AVCodecParserContext`] with given [`AVCodecID`].
     pub fn init(codec_id: AVCodecID) -> Option<Self> {
-        // `av_parser_init()` took a plain `int` parameter before FFmpeg 9,
-        // which changed it to `enum AVCodecID`. On non-MSVC targets the
-        // enum's underlying type is c_uint, which doesn't match the `int`
-        // parameter on FFmpeg < 9, so a cast is needed there.
+        // `av_parser_init()` takes a plain `int` before FFmpeg 9 and
+        // `enum AVCodecID` since, and the enum's underlying type is c_int on
+        // MSVC and c_uint elsewhere, so the parameter type varies.
         // ref: https://github.com/rust-lang/rust-bindgen/issues/1361
-        #[cfg(all(not(feature = "ffmpeg9"), not(target_env = "msvc")))]
-        let codec_id = codec_id as i32;
-        unsafe { ffi::av_parser_init(codec_id) }
+        unsafe { ffi::av_parser_init(codec_id as _) }
             .upgrade()
             .map(|x| unsafe { Self::from_raw(x) })
     }
