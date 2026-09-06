@@ -36,7 +36,11 @@ impl Drop for AVChannelLayout {
 
 impl Clone for AVChannelLayout {
     fn clone(&self) -> Self {
-        let mut layout = MaybeUninit::<ffi::AVChannelLayout>::uninit();
+        // `av_channel_layout_copy` first calls `av_channel_layout_uninit` on the
+        // destination, which reads `dst->order` / `dst->u.map`. The destination must
+        // therefore be zero-initialized (not left `uninit`) to avoid reading
+        // uninitialised memory (valgrind: "Conditional jump ... uninitialised value").
+        let mut layout = MaybeUninit::<ffi::AVChannelLayout>::zeroed();
         // unwrap: this function only fail on OOM.
         unsafe { ffi::av_channel_layout_copy(layout.as_mut_ptr(), self.as_ptr()) }
             .upgrade()
