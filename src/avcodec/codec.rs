@@ -505,8 +505,8 @@ impl AVSubtitle {
     /// `avsubtitle_free` when this subtitle is dropped.
     pub fn push_ass_rect(&mut self, ass: &CStr) -> Result<()> {
         unsafe {
-            let rect =
-                ffi::av_mallocz(std::mem::size_of::<ffi::AVSubtitleRect>()) as *mut ffi::AVSubtitleRect;
+            let rect = ffi::av_mallocz(std::mem::size_of::<ffi::AVSubtitleRect>())
+                as *mut ffi::AVSubtitleRect;
             if rect.is_null() {
                 return Err(RsmpegError::AVError(AVERROR_ENOMEM));
             }
@@ -539,6 +539,57 @@ impl AVSubtitle {
     /// Returns the number of rects in this subtitle.
     pub fn num_rects(&self) -> u32 {
         unsafe { self.as_ptr().read().num_rects }
+    }
+
+    /// Iterate over the [`AVSubtitleRectRef`]s of this subtitle.
+    ///
+    /// Yields borrowed views over the raw `AVSubtitleRect`s owned by this
+    /// subtitle; use it to inspect decoded subtitles (e.g. text/ASS payload)
+    /// or verify encoded ones.
+    pub fn rect_iter(&self) -> impl Iterator<Item = AVSubtitleRectRef<'_>> {
+        let sub = unsafe { self.as_ptr().read() };
+        let count = sub.num_rects as usize;
+        let mut index = 0usize;
+        std::iter::from_fn(move || {
+            if index >= count {
+                return None;
+            }
+            let rect = unsafe { &*(*sub.rects.add(index)) };
+            index += 1;
+            Some(AVSubtitleRectRef { raw: rect })
+        })
+    }
+}
+
+/// Borrowed view over an [`ffi::AVSubtitleRect`] owned by an [`AVSubtitle`].
+pub struct AVSubtitleRectRef<'a> {
+    raw: &'a ffi::AVSubtitleRect,
+}
+
+impl AVSubtitleRectRef<'_> {
+    /// Returns the rect type (`SUBTITLE_NONE` / `SUBTITLE_BITMAP` /
+    /// `SUBTITLE_TEXT` / `SUBTITLE_ASS`).
+    pub fn type_(&self) -> ffi::AVSubtitleType {
+        self.raw.type_
+    }
+
+    /// Returns the ASS-formatted payload (`Dialogue:` line) for
+    /// `SUBTITLE_ASS` rects.
+    pub fn ass(&self) -> Option<&CStr> {
+        if self.raw.ass.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(self.raw.ass) })
+        }
+    }
+
+    /// Returns the plain-text payload for `SUBTITLE_TEXT` rects.
+    pub fn text(&self) -> Option<&CStr> {
+        if self.raw.text.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(self.raw.text) })
+        }
     }
 }
 
