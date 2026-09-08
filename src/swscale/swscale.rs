@@ -222,6 +222,21 @@ impl SwsContext {
     }
 }
 
+#[cfg(feature = "ffmpeg8")]
+settable!(SwsContext {
+    flags: u32,
+    threads: i32,
+    intent: i32,
+    dither: ffi::SwsDither,
+    alpha_blend: ffi::SwsAlphaBlend,
+});
+
+#[cfg(feature = "ffmpeg9")]
+settable!(SwsContext {
+    scaler: ffi::SwsScaler,
+    backends: ffi::SwsBackend,
+});
+
 impl Drop for SwsContext {
     fn drop(&mut self) {
         unsafe { ffi::sws_freeContext(self.as_mut_ptr()) }
@@ -297,5 +312,40 @@ mod tests {
         assert_eq!(dst.format, ffi::AV_PIX_FMT_RGB24 as i32);
         assert!(!dst.data[0].is_null());
         assert!(dst.linesize[0] >= 32 * 3);
+    }
+
+    #[test]
+    #[cfg(feature = "ffmpeg8")]
+    fn test_alloc_setters_and_scale_full_frame() {
+        use crate::{
+            avutil::AVImage,
+            ffi::{SWS_ACCURATE_RND, SWS_BITEXACT, SWS_DITHER_AUTO},
+        };
+
+        // Verify the modern-API field setters on an allocated context.
+        let src_img = AVImage::new(ffi::AV_PIX_FMT_YUV420P, 64, 64, 1).unwrap();
+        let mut src = AVFrame::new();
+        src.data_mut().clone_from(src_img.data());
+        src.linesize_mut().clone_from(src_img.linesizes());
+        src.set_format(ffi::AV_PIX_FMT_YUV420P as i32);
+        src.set_width(64);
+        src.set_height(64);
+
+        let mut dst = AVFrame::new();
+        dst.set_width(32);
+        dst.set_height(32);
+        dst.set_format(ffi::AV_PIX_FMT_RGB24 as i32);
+
+        let mut context = SwsContext::alloc().unwrap();
+        context.set_flags((SWS_ACCURATE_RND | SWS_BITEXACT | ffi::SWS_BICUBIC) as u32);
+        context.set_threads(0);
+        context.set_dither(SWS_DITHER_AUTO);
+        #[cfg(feature = "ffmpeg9")]
+        context.set_scaler(ffi::SWS_SCALE_BICUBIC);
+        context.scale_full_frame(&mut dst, &src).unwrap();
+
+        assert_eq!(dst.width, 32);
+        assert_eq!(dst.height, 32);
+        assert!(!dst.data[0].is_null());
     }
 }
