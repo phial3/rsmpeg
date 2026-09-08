@@ -321,12 +321,12 @@ impl AVCodecContext {
             return Err(RsmpegError::AVError(AVERROR_ENOMEM));
         }
         unsafe {
-            let ctx = self.as_mut_ptr();
+            let ctx = self.deref_mut();
             // Free a previously-set header (repeated calls before open2) to
             // avoid leaking it; av_freep also nulls the pointer.
-            ffi::av_freep(std::ptr::addr_of_mut!((*ctx).subtitle_header).cast());
-            (*ctx).subtitle_header = dup.cast();
-            (*ctx).subtitle_header_size = header.count_bytes() as i32;
+            ffi::av_freep(std::ptr::addr_of_mut!(ctx.subtitle_header).cast());
+            ctx.subtitle_header = dup.cast();
+            ctx.subtitle_header_size = header.count_bytes() as i32;
         }
         Ok(())
     }
@@ -538,7 +538,7 @@ impl AVSubtitle {
 
     /// Returns the number of rects in this subtitle.
     pub fn num_rects(&self) -> u32 {
-        unsafe { self.as_ptr().read().num_rects }
+        self.num_rects
     }
 
     /// Iterate over the [`AVSubtitleRectRef`]s of this subtitle.
@@ -547,16 +547,12 @@ impl AVSubtitle {
     /// subtitle; use it to inspect decoded subtitles (e.g. text/ASS payload)
     /// or verify encoded ones.
     pub fn rect_iter(&self) -> impl Iterator<Item = AVSubtitleRectRef<'_>> {
-        let sub = unsafe { self.as_ptr().read() };
-        let count = sub.num_rects as usize;
-        let mut index = 0usize;
-        std::iter::from_fn(move || {
-            if index >= count {
-                return None;
-            }
-            let rect = unsafe { &*(*sub.rects.add(index)) };
-            index += 1;
-            Some(AVSubtitleRectRef { raw: rect })
+        let sub = unsafe { &*self.as_ptr() };
+        let rects = unsafe { std::slice::from_raw_parts(sub.rects, sub.num_rects as usize) };
+        rects.iter().map(|&rect| AVSubtitleRectRef {
+            // SAFETY: FFmpeg guarantees `rects[0..num_rects]` to be valid,
+            // non-null rect pointers (`push_ass_rect` upholds this too).
+            raw: unsafe { &*rect },
         })
     }
 }
@@ -660,6 +656,16 @@ mod tests {
             .push_ass_rect(c"Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,Hello World")
             .unwrap();
         assert_eq!(subtitle.num_rects(), 1);
+
+        // Borrowed iteration sees the pushed rect with its ASS payload.
+        let rects: Vec<_> = subtitle.rect_iter().collect();
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].type_(), ffi::SUBTITLE_ASS);
+        assert!(rects[0].text().is_none(), "ASS rect has no plain text");
+        assert_eq!(
+            rects[0].ass(),
+            Some(c"Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,Hello World"),
+        );
 
         let mut buf = vec![0u8; 8192];
         let len = ctx.encode_subtitle(&subtitle, &mut buf).unwrap();
