@@ -396,6 +396,22 @@ impl AVCodecContext {
         unsafe { self.get_supported_config(codec, ffi::AV_CODEC_CONFIG_SAMPLE_FORMAT) }
     }
 
+    /// Retrieve a list of all supported frame rates.
+    /// Returns `Some(&[])` if all possible frame rates are supported
+    /// - `avctx`: codec The codec to query, or None to use self.codec
+    #[cfg(feature = "ffmpeg7_1")]
+    pub fn get_supported_frame_rates(&self, codec: Option<&AVCodec>) -> Result<&[AVRational]> {
+        unsafe { self.get_supported_config(codec, ffi::AV_CODEC_CONFIG_FRAME_RATE) }
+    }
+
+    /// Retrieve a list of all supported sample rates.
+    /// Returns `Some(&[])` if all possible sample rates are supported
+    /// - `avctx`: codec The codec to query, or None to use self.codec
+    #[cfg(feature = "ffmpeg7_1")]
+    pub fn get_supported_sample_rates(&self, codec: Option<&AVCodec>) -> Result<&[i32]> {
+        unsafe { self.get_supported_config(codec, ffi::AV_CODEC_CONFIG_SAMPLE_RATE) }
+    }
+
     /// Retrieve a list of all supported values for a given configuration type.
     ///
     /// # Safety
@@ -548,7 +564,11 @@ impl AVSubtitle {
     /// or verify encoded ones.
     pub fn rect_iter(&self) -> impl Iterator<Item = AVSubtitleRectRef<'_>> {
         let sub = unsafe { &*self.as_ptr() };
-        let rects = unsafe { std::slice::from_raw_parts(sub.rects, sub.num_rects as usize) };
+        let rects: &[*mut ffi::AVSubtitleRect] = if sub.num_rects == 0 || sub.rects.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(sub.rects, sub.num_rects as usize) }
+        };
         rects.iter().map(|&rect| AVSubtitleRectRef {
             // SAFETY: FFmpeg guarantees `rects[0..num_rects]` to be valid,
             // non-null rect pointers (`push_ass_rect` upholds this too).
@@ -676,5 +696,14 @@ mod tests {
 
         // Cleanup check: dropping the subtitle frees the pushed rect.
         drop(subtitle);
+    }
+
+    /// An empty subtitle (num_rects == 0, null rects) must iterate to nothing
+    /// instead of hitting the `slice::from_raw_parts` null-pointer precondition.
+    #[test]
+    fn test_subtitle_rect_iter_empty() {
+        let subtitle = AVSubtitle::new();
+        assert_eq!(subtitle.num_rects(), 0);
+        assert_eq!(subtitle.rect_iter().count(), 0);
     }
 }
