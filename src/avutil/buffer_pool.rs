@@ -15,7 +15,7 @@
 //! # Example
 //!
 //! ```
-//! use rsmpeg::avutil::BufferPool;
+//! use rsmpeg::avutil::AVBufferPool;
 //!
 //! let mut pool = AVBufferPool::new(1024).unwrap();
 //!
