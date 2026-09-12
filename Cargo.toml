@@ -40,9 +40,7 @@ ffmpeg7_1 = ["ffmpeg7", "rusty_ffmpeg/ffmpeg7_1"]
 # ffmpeg 8+
 ffmpeg8 = ["ffmpeg7_1", "rusty_ffmpeg/ffmpeg8"]
 ffmpeg8_1 = ["ffmpeg8", "rusty_ffmpeg/ffmpeg8_1"]
-# ffmpeg 9+ removed the deprecated AVCodec static array fields
-# (pix_fmts, sample_fmts, supported_framerates, supported_samplerates,
-# ch_layouts), use avcodec_get_supported_config() instead.
+# ffmpeg 9+
 ffmpeg9 = ["ffmpeg8_1", "rusty_ffmpeg/ffmpeg9"]
 
 # Try linking ffmpeg with pkg-config.
