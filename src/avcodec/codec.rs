@@ -13,7 +13,7 @@ pub use ffi::AVCodecConfig;
 #[cfg(feature = "ffmpeg7_1")]
 use std::slice;
 use std::{
-    ffi::{c_void, CStr},
+    ffi::{CStr, c_void},
     ptr::{self, NonNull},
 };
 
@@ -86,6 +86,10 @@ impl Iterator for AVCodecIter {
     }
 }
 
+// FFmpeg 9 removed the deprecated AVCodec static array fields
+// (supported_framerates, pix_fmts, supported_samplerates, sample_fmts).
+// Use `AVCodecContext::get_supported_config()` (FFmpeg 7.1+) instead.
+#[cfg(not(feature = "ffmpeg9"))]
 impl<'codec> AVCodec {
     /// Return supported framerates of this [`AVCodec`].
     pub fn supported_framerates(&'codec self) -> Option<&'codec [AVRational]> {
@@ -279,9 +283,14 @@ impl AVCodecContext {
         Ok(Some(subtitle))
     }
 
-    /// Encode subtitle to buffer.
-    pub fn encode_subtitle(&mut self, subtitle: &AVSubtitle, buf: &mut [u8]) -> Result<()> {
-        unsafe {
+    /// Encode subtitle to buffer, returning the number of bytes written.
+    ///
+    /// Subtitle encoding uses the synchronous `avcodec_encode_subtitle` API
+    /// (there is no send/receive queue for subtitles), so each call produces
+    /// exactly one buffer content. The caller is responsible for building the
+    /// `AVPacket` (pts/duration/stream_index) from the returned byte count.
+    pub fn encode_subtitle(&mut self, subtitle: &AVSubtitle, buf: &mut [u8]) -> Result<usize> {
+        let len = unsafe {
             ffi::avcodec_encode_subtitle(
                 self.as_mut_ptr(),
                 buf.as_mut_ptr(),
@@ -290,6 +299,35 @@ impl AVCodecContext {
             )
         }
         .upgrade()?;
+        Ok(len as usize)
+    }
+
+    /// Set the ASS script header (the `[Script Info]` and `[V4+ Styles]`
+    /// sections, plus the `[Events]` format line, without any `Dialogue` line)
+    /// on this codec context.
+    ///
+    /// Subtitle encoders (mov_text, subrip, ...) require this header to be set
+    /// **before** [`open2`](Self::open), otherwise the encoder init fails with
+    /// `AVERROR_INVALIDDATA` because it cannot split the ASS header. In a
+    /// transcode pipeline, copy the header from the decoder side instead of
+    /// building one by hand: subtitle decoders populate `subtitle_header`
+    /// during `open2`, and it should be forwarded to the encoder context.
+    ///
+    /// The string is copied with `av_strdup`; ownership is transferred to
+    /// FFmpeg and it is freed in `avcodec_free_context`.
+    pub fn set_subtitle_header(&mut self, header: &CStr) -> Result<()> {
+        let dup = unsafe { ffi::av_strdup(header.as_ptr()) };
+        if dup.is_null() {
+            return Err(RsmpegError::AVError(AVERROR_ENOMEM));
+        }
+        unsafe {
+            let ctx = self.deref_mut();
+            // Free a previously-set header (repeated calls before open2) to
+            // avoid leaking it; av_freep also nulls the pointer.
+            ffi::av_freep(std::ptr::addr_of_mut!(ctx.subtitle_header).cast());
+            ctx.subtitle_header = dup.cast();
+            ctx.subtitle_header_size = header.count_bytes() as i32;
+        }
         Ok(())
     }
 
@@ -356,6 +394,22 @@ impl AVCodecContext {
     #[cfg(feature = "ffmpeg7_1")]
     pub fn get_supported_sample_fmts(&self, codec: Option<&AVCodec>) -> Result<&[AVSampleFormat]> {
         unsafe { self.get_supported_config(codec, ffi::AV_CODEC_CONFIG_SAMPLE_FORMAT) }
+    }
+
+    /// Retrieve a list of all supported frame rates.
+    /// Returns `Some(&[])` if all possible frame rates are supported
+    /// - `avctx`: codec The codec to query, or None to use self.codec
+    #[cfg(feature = "ffmpeg7_1")]
+    pub fn get_supported_frame_rates(&self, codec: Option<&AVCodec>) -> Result<&[AVRational]> {
+        unsafe { self.get_supported_config(codec, ffi::AV_CODEC_CONFIG_FRAME_RATE) }
+    }
+
+    /// Retrieve a list of all supported sample rates.
+    /// Returns `Some(&[])` if all possible sample rates are supported
+    /// - `avctx`: codec The codec to query, or None to use self.codec
+    #[cfg(feature = "ffmpeg7_1")]
+    pub fn get_supported_sample_rates(&self, codec: Option<&AVCodec>) -> Result<&[i32]> {
+        unsafe { self.get_supported_config(codec, ffi::AV_CODEC_CONFIG_SAMPLE_RATE) }
     }
 
     /// Retrieve a list of all supported values for a given configuration type.
@@ -456,6 +510,103 @@ impl AVSubtitle {
         let subtitle = NonNull::new(subtitle).unwrap();
         unsafe { AVSubtitle::from_raw(subtitle) }
     }
+
+    /// Push an ASS-text [`AVSubtitleRect`](ffi::AVSubtitleRect) into this
+    /// subtitle.
+    ///
+    /// `ass` must be a full ASS `Dialogue:` line (e.g.
+    /// `Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,Hello`). The rect
+    /// and the string copy are allocated with the av_malloc family and
+    /// ownership is transferred to this subtitle; they are freed by
+    /// `avsubtitle_free` when this subtitle is dropped.
+    pub fn push_ass_rect(&mut self, ass: &CStr) -> Result<()> {
+        unsafe {
+            let rect = ffi::av_mallocz(std::mem::size_of::<ffi::AVSubtitleRect>())
+                as *mut ffi::AVSubtitleRect;
+            if rect.is_null() {
+                return Err(RsmpegError::AVError(AVERROR_ENOMEM));
+            }
+            let ass_dup = ffi::av_strdup(ass.as_ptr());
+            if ass_dup.is_null() {
+                ffi::av_free(rect.cast());
+                return Err(RsmpegError::AVError(AVERROR_ENOMEM));
+            }
+            (*rect).type_ = ffi::SUBTITLE_ASS;
+            (*rect).ass = ass_dup;
+
+            let sub = self.as_mut_ptr();
+            let old_count = (*sub).num_rects as usize;
+            let new_rects = ffi::av_realloc(
+                (*sub).rects.cast(),
+                (old_count + 1) * std::mem::size_of::<*mut ffi::AVSubtitleRect>(),
+            ) as *mut *mut ffi::AVSubtitleRect;
+            if new_rects.is_null() {
+                ffi::av_freep(std::ptr::addr_of_mut!((*rect).ass).cast());
+                ffi::av_free(rect.cast());
+                return Err(RsmpegError::AVError(AVERROR_ENOMEM));
+            }
+            *new_rects.add(old_count) = rect;
+            (*sub).rects = new_rects;
+            (*sub).num_rects = (old_count + 1) as u32;
+        }
+        Ok(())
+    }
+
+    /// Returns the number of rects in this subtitle.
+    pub fn num_rects(&self) -> u32 {
+        self.num_rects
+    }
+
+    /// Iterate over the [`AVSubtitleRectRef`]s of this subtitle.
+    ///
+    /// Yields borrowed views over the raw `AVSubtitleRect`s owned by this
+    /// subtitle; use it to inspect decoded subtitles (e.g. text/ASS payload)
+    /// or verify encoded ones.
+    pub fn rect_iter(&self) -> impl Iterator<Item = AVSubtitleRectRef<'_>> {
+        let sub = unsafe { &*self.as_ptr() };
+        let rects: &[*mut ffi::AVSubtitleRect] = if sub.num_rects == 0 || sub.rects.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(sub.rects, sub.num_rects as usize) }
+        };
+        rects.iter().map(|&rect| AVSubtitleRectRef {
+            // SAFETY: FFmpeg guarantees `rects[0..num_rects]` to be valid,
+            // non-null rect pointers (`push_ass_rect` upholds this too).
+            raw: unsafe { &*rect },
+        })
+    }
+}
+
+/// Borrowed view over an [`ffi::AVSubtitleRect`] owned by an [`AVSubtitle`].
+pub struct AVSubtitleRectRef<'a> {
+    raw: &'a ffi::AVSubtitleRect,
+}
+
+impl AVSubtitleRectRef<'_> {
+    /// Returns the rect type (`SUBTITLE_NONE` / `SUBTITLE_BITMAP` /
+    /// `SUBTITLE_TEXT` / `SUBTITLE_ASS`).
+    pub fn type_(&self) -> ffi::AVSubtitleType {
+        self.raw.type_
+    }
+
+    /// Returns the ASS-formatted payload (`Dialogue:` line) for
+    /// `SUBTITLE_ASS` rects.
+    pub fn ass(&self) -> Option<&CStr> {
+        if self.raw.ass.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(self.raw.ass) })
+        }
+    }
+
+    /// Returns the plain-text payload for `SUBTITLE_TEXT` rects.
+    pub fn text(&self) -> Option<&CStr> {
+        if self.raw.text.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(self.raw.text) })
+        }
+    }
 }
 
 impl Drop for AVSubtitle {
@@ -493,5 +644,66 @@ mod tests {
             }
             println!("codec: {:?}: {:?}", codec.name(), codec.long_name());
         }
+    }
+
+    /// Minimal subtitle-encoding roundtrip: set ASS header -> open subrip
+    /// encoder -> push ASS rect -> encode_subtitle returns byte count.
+    #[test]
+    fn test_subtitle_encode_subrip() {
+        let Some(encoder) = AVCodec::find_encoder_by_name(c"subrip") else {
+            println!("skip: subrip encoder not available");
+            return;
+        };
+
+        let mut ctx = AVCodecContext::new(&encoder);
+        ctx.set_time_base(AVRational { num: 1, den: 1000 });
+        ctx.set_subtitle_header(
+            c"[Script Info]\n\
+              ScriptType: v4.00+\n\
+              \n\
+              [V4+ Styles]\n\
+              Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
+              Style: Default,Arial,16,&Hffffff,&Hffffff,&H0,&H0,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n\
+              \n\
+              [Events]\n\
+              Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
+        )
+        .unwrap();
+        ctx.open(None).unwrap();
+
+        let mut subtitle = AVSubtitle::new();
+        subtitle
+            .push_ass_rect(c"Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,Hello World")
+            .unwrap();
+        assert_eq!(subtitle.num_rects(), 1);
+
+        // Borrowed iteration sees the pushed rect with its ASS payload.
+        let rects: Vec<_> = subtitle.rect_iter().collect();
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].type_(), ffi::SUBTITLE_ASS);
+        assert!(rects[0].text().is_none(), "ASS rect has no plain text");
+        assert_eq!(
+            rects[0].ass(),
+            Some(c"Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,Hello World"),
+        );
+
+        let mut buf = vec![0u8; 8192];
+        let len = ctx.encode_subtitle(&subtitle, &mut buf).unwrap();
+        println!("subrip encoded {len} bytes");
+        assert!(len > 0, "subrip should produce output");
+        let text = std::str::from_utf8(&buf[..len]).unwrap();
+        assert!(text.contains("Hello World"), "got: {text:?}");
+
+        // Cleanup check: dropping the subtitle frees the pushed rect.
+        drop(subtitle);
+    }
+
+    /// An empty subtitle (num_rects == 0, null rects) must iterate to nothing
+    /// instead of hitting the `slice::from_raw_parts` null-pointer precondition.
+    #[test]
+    fn test_subtitle_rect_iter_empty() {
+        let subtitle = AVSubtitle::new();
+        assert_eq!(subtitle.num_rects(), 0);
+        assert_eq!(subtitle.rect_iter().count(), 0);
     }
 }
