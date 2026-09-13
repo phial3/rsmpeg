@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_void, CStr},
+    ffi::{CStr, c_void},
     ops::Deref,
     ptr::{self, NonNull},
     slice,

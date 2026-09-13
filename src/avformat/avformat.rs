@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_void, CStr},
+    ffi::{CStr, c_void},
     os::raw::c_int,
     ptr::{self, NonNull},
 };

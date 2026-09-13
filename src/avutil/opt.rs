@@ -4,7 +4,7 @@ use crate::{
     ffi::{AVPixelFormat, AVRational, AVSampleFormat},
     shared::RetUpgrade,
 };
-use std::ffi::{c_double, c_int, c_void, CStr};
+use std::ffi::{CStr, c_double, c_int, c_void};
 
 /// - `name`: the name of the field to set
 /// - `val`: if the field is not of a string type, then the given string is parsed.

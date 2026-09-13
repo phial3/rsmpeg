@@ -11,9 +11,9 @@ Taking advantage of Rust's language design, you can build robust multi-media pro
 
 ## Dependency requirements
 
-Supported FFmpeg versions are `6.*`, `7.*`.
+Supported FFmpeg versions are `6.*`, `7.*`, `8.*` and `9.*`.
 
-Minimum Supported Rust Version is `1.81.0`(stable channel).
+Minimum Supported Rust Version is `1.85.0`(stable channel, edition 2024).
 
 ## Getting started
 

@@ -1,7 +1,7 @@
 use std::{
     ffi::CStr,
     ops::Deref,
-    ptr::{null_mut, NonNull},
+    ptr::{NonNull, null_mut},
     slice,
 };
 

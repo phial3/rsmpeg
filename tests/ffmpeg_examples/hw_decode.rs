@@ -1,13 +1,13 @@
 //! RIIR: https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/hw_decode.c
 //! HW-accelerated decoding example using rsmpeg
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use once_cell::sync::OnceCell;
 use rsmpeg::{
     avcodec::AVCodecContext,
     avformat::AVFormatContextInput,
     avutil::{
-        hwdevice_find_type_by_name, hwdevice_get_type_name, hwdevice_iterate_types, AVFrame,
-        AVHWDeviceContext, AVHWDeviceType, AVImage, AVPixelFormat,
+        AVFrame, AVHWDeviceContext, AVHWDeviceType, AVImage, AVPixelFormat,
+        hwdevice_find_type_by_name, hwdevice_get_type_name, hwdevice_iterate_types,
     },
     build_array, ffi,
 };

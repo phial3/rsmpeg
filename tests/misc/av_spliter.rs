@@ -1,6 +1,6 @@
 //! A test that split a video(H.264, AAC) file to a AAC file and a H.264
 //! file(Annex B). Showing the usage of `AVBitStream` related APIs.
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use rsmpeg::{
     avcodec::{AVBSFContextUninit, AVBitStreamFilter},
     avformat::{AVFormatContextInput, AVFormatContextOutput},

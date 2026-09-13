@@ -1,6 +1,6 @@
 use std::{
     ffi::CStr,
-    mem::{size_of, MaybeUninit},
+    mem::{MaybeUninit, size_of},
     ptr::{self, NonNull},
 };
 

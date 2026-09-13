@@ -1,11 +1,12 @@
 //! RIIR: https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/demux_decode.c
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rsmpeg::{
     avcodec::{AVCodecContext, AVPacket},
     avformat::AVFormatContextInput,
     avutil::{
-        get_bytes_per_sample, get_media_type_string, get_packed_sample_fmt, get_pix_fmt_name,
-        get_sample_fmt_name, sample_fmt_is_planar, ts2timestr, AVChannelLayout, AVFrame,
+        AVChannelLayout, AVFrame, get_bytes_per_sample, get_media_type_string,
+        get_packed_sample_fmt, get_pix_fmt_name, get_sample_fmt_name, sample_fmt_is_planar,
+        ts2timestr,
     },
     error::RsmpegError,
     ffi,
@@ -55,8 +56,10 @@ fn output_video_frame(state: &mut DemuxState, frame: &AVFrame) -> Result<()> {
         let new_fmt = get_pix_fmt_name(frame.format as ffi::AVPixelFormat)
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
-        eprintln!("Error: Width, height and pixel format have to be constant in a rawvideo file, but the width, height or pixel format of the input video changed:\nold: width = {}, height = {}, format = {}\nnew: width = {}, height = {}, format = {}",
-            state.width, state.height, old_fmt, frame.width, frame.height, new_fmt);
+        eprintln!(
+            "Error: Width, height and pixel format have to be constant in a rawvideo file, but the width, height or pixel format of the input video changed:\nold: width = {}, height = {}, format = {}\nnew: width = {}, height = {}, format = {}",
+            state.width, state.height, old_fmt, frame.width, frame.height, new_fmt
+        );
         return Err(anyhow!("video params changed"));
     }
 
@@ -255,12 +258,12 @@ fn demux_decode(input_raw: &CStr, video_out: &str, audio_out: &str) -> Result<()
 
     // Read packets and decode
     while let Some(pkt) = ictx.read_packet()? {
-        if let (Some(ref mut vc), Some(vsi)) = (&mut video_ctx, video_stream_index) {
+        if let (Some(vc), Some(vsi)) = (&mut video_ctx, video_stream_index) {
             if pkt.stream_index == vsi {
                 decode_packet(vc, Some(&pkt), &mut state)?;
             }
         }
-        if let (Some(ref mut ac), Some(asi)) = (&mut audio_ctx, audio_stream_index) {
+        if let (Some(ac), Some(asi)) = (&mut audio_ctx, audio_stream_index) {
             if pkt.stream_index == asi {
                 decode_packet(ac, Some(&pkt), &mut state)?;
             }
@@ -268,10 +271,10 @@ fn demux_decode(input_raw: &CStr, video_out: &str, audio_out: &str) -> Result<()
     }
 
     // Flush decoders
-    if let Some(ref mut vc) = video_ctx {
+    if let Some(vc) = video_ctx.as_mut() {
         decode_packet(vc, None, &mut state)?;
     }
-    if let Some(ref mut ac) = audio_ctx {
+    if let Some(ac) = audio_ctx.as_mut() {
         decode_packet(ac, None, &mut state)?;
     }
 

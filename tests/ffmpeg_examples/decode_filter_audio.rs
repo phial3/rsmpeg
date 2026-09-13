@@ -1,10 +1,10 @@
 //! RIIR: https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_audio.c
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rsmpeg::{
     avcodec::AVCodecContext,
     avfilter::{AVFilter, AVFilterGraph, AVFilterInOut},
     avformat::AVFormatContextInput,
-    avutil::{get_sample_fmt_name, AVChannelLayout, AVFrame},
+    avutil::{AVChannelLayout, AVFrame, get_sample_fmt_name},
     ffi,
 };
 use std::{ffi::CStr, fs::File, io::Write, path::Path};
@@ -183,7 +183,7 @@ fn decode_filter_audio(input: &CStr, out_path: &str) -> Result<()> {
                     Err(rsmpeg::error::RsmpegError::DecoderDrainError)
                     | Err(rsmpeg::error::RsmpegError::DecoderFlushedError) => break,
                     Err(e) => {
-                        return Err(e).context("Error while receiving a frame from the decoder")
+                        return Err(e).context("Error while receiving a frame from the decoder");
                     }
                 }
             }
