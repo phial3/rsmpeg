@@ -1,5 +1,5 @@
 use crate::{
-    avutil::{av_image_fill_arrays, AVChannelLayoutRef, AVImage, AVMotionVector, AVPixelFormat},
+    avutil::{AVChannelLayoutRef, AVImage, AVMotionVector, AVPixelFormat, av_image_fill_arrays},
     error::*,
     ffi,
     shared::*,
@@ -370,7 +370,10 @@ impl<'frame> AVFrameSideDataRef<'frame> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{avcodec::AVCodec, avutil::AVChannelLayout};
+    use crate::{
+        avcodec::{AVCodec, AVCodecContext},
+        avutil::AVChannelLayout,
+    };
 
     #[test]
     fn test_get_buffer() {
@@ -378,7 +381,7 @@ mod test {
         let mut frame = AVFrame::new();
         frame.set_nb_samples(2);
         frame.set_ch_layout(AVChannelLayout::from_nb_channels(2).into_inner());
-        frame.set_format(encoder.sample_fmts().unwrap()[0]);
+        frame.set_format(first_supported_sample_fmt(&encoder));
         assert!(frame.alloc_buffer().is_ok());
     }
 
@@ -397,7 +400,7 @@ mod test {
         let mut frame = AVFrame::new();
         frame.set_nb_samples(2);
         frame.set_ch_layout(AVChannelLayout::from_nb_channels(2).into_inner());
-        frame.set_format(encoder.sample_fmts().unwrap()[0]);
+        frame.set_format(first_supported_sample_fmt(&encoder));
         frame.alloc_buffer().unwrap();
         assert!(matches!(
             frame.alloc_buffer(),
@@ -410,5 +413,19 @@ mod test {
         let image = AVImage::new(ffi::AV_PIX_FMT_RGB24, 256, 256, 0).unwrap();
         let frame = AVFrameWithImage::new(image);
         let _: &Vec<u8> = &frame.image;
+    }
+
+    #[cfg(not(feature = "ffmpeg7_1"))]
+    fn first_supported_sample_fmt(encoder: &AVCodec) -> i32 {
+        encoder.sample_fmts().unwrap()[0]
+    }
+
+    #[cfg(feature = "ffmpeg7_1")]
+    fn first_supported_sample_fmt(encoder: &AVCodec) -> i32 {
+        AVCodecContext::new(encoder)
+            .get_supported_sample_fmts(None)
+            .ok()
+            .and_then(|fmts| fmts.first().copied())
+            .unwrap_or(ffi::AV_SAMPLE_FMT_FLTP)
     }
 }
