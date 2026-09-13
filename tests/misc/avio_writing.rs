@@ -1,13 +1,13 @@
 /// Simplified transcoding test, select the first video stream in given video file
 /// and transcode it. Store the output in memory.
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use rsmpeg::{
     self,
     avcodec::{AVCodec, AVCodecContext},
     avformat::{
         AVFormatContextInput, AVFormatContextOutput, AVIOContextContainer, AVIOContextCustom,
     },
-    avutil::{av_inv_q, AVFrame, AVMem},
+    avutil::{AVFrame, AVMem, av_inv_q},
     error::RsmpegError,
     ffi,
 };
@@ -94,11 +94,20 @@ fn open_output_file(
     encode_context.set_height(decode_context.height);
     encode_context.set_width(decode_context.width);
     encode_context.set_sample_aspect_ratio(decode_context.sample_aspect_ratio);
+    #[cfg(not(feature = "ffmpeg7_1"))]
     encode_context.set_pix_fmt(if let Some(pix_fmts) = encoder.pix_fmts() {
         pix_fmts[0]
     } else {
         decode_context.pix_fmt
     });
+    #[cfg(feature = "ffmpeg7_1")]
+    encode_context.set_pix_fmt(
+        encode_context
+            .get_supported_pix_fmts(None)
+            .ok()
+            .and_then(|fmts| fmts.first().copied())
+            .unwrap_or(decode_context.pix_fmt),
+    );
     encode_context.set_time_base(av_inv_q(decode_context.framerate));
 
     // Some formats want stream headers to be separate.
@@ -205,7 +214,7 @@ pub fn transcoding(input_file: &CStr, output_file: &CStr) -> Result<()> {
             let mut frame = match decode_context.receive_frame() {
                 Ok(frame) => frame,
                 Err(RsmpegError::DecoderDrainError) | Err(RsmpegError::DecoderFlushedError) => {
-                    break
+                    break;
                 }
                 Err(e) => bail!(e),
             };

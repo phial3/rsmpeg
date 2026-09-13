@@ -1,6 +1,6 @@
 use rsmpeg::{avcodec::*, avformat::*, avutil::*, error::RsmpegError, ffi, swscale::*};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{
     ffi::CStr,
     fs::{self, File},
@@ -62,17 +62,34 @@ fn thumbnail(
         encode_context.set_width(width.unwrap_or(decode_context.width));
         encode_context.set_height(height.unwrap_or(decode_context.height));
         encode_context.set_time_base(av_inv_q(decode_context.framerate));
+        #[cfg(not(feature = "ffmpeg7_1"))]
         encode_context.set_pix_fmt(if let Some(pix_fmts) = encoder.pix_fmts() {
             pix_fmts[0]
         } else {
             decode_context.pix_fmt
         });
+        #[cfg(feature = "ffmpeg7_1")]
+        encode_context.set_pix_fmt(
+            encode_context
+                .get_supported_pix_fmts(None)
+                .ok()
+                .and_then(|fmts| fmts.first().copied())
+                .unwrap_or(decode_context.pix_fmt),
+        );
         encode_context.open(None)?;
 
         encode_context
     };
 
     let scaled_cover_packet = {
+        // Since FFmpeg 8, prefer the modern swscale API: allocate a context
+        // and scale frames directly, with all parameters derived from the
+        // frame properties. Older FFmpeg falls back to the classic
+        // sws_getContext() + sws_scale() workflow (`sws_scale_frame()`
+        // crashes on FFmpeg 7.x due to an upstream buffer pool bug).
+        #[cfg(feature = "ffmpeg8")]
+        let mut sws_context = SwsContext::alloc().context("Failed to allocate swscale context.")?;
+        #[cfg(not(feature = "ffmpeg8"))]
         let mut sws_context = SwsContext::get_context(
             decode_context.width,
             decode_context.height,
@@ -80,7 +97,7 @@ fn thumbnail(
             encode_context.width,
             encode_context.height,
             encode_context.pix_fmt,
-            ffi::SWS_FAST_BILINEAR | ffi::SWS_PRINT_INFO,
+            (ffi::SWS_FAST_BILINEAR | ffi::SWS_PRINT_INFO) as u32,
             None,
             None,
             None,
@@ -97,6 +114,9 @@ fn thumbnail(
 
         let mut scaled_cover_frame = AVFrameWithImage::new(image_buffer);
 
+        #[cfg(feature = "ffmpeg8")]
+        sws_context.scale_full_frame(&mut scaled_cover_frame, &cover_frame)?;
+        #[cfg(not(feature = "ffmpeg8"))]
         sws_context.scale_frame(
             &cover_frame,
             0,
