@@ -1,17 +1,15 @@
 [package]
 name = "rsmpeg"
-version = "0.17.0+ffmpeg.7.1"
-edition = "2021"
-license = "MIT"
+edition = "2024"
+rust-version = "1.89"
+version = "0.18.1+ffmpeg.9.0"
 authors = ["liudingming <liudingming@bytedance.com>"]
 description = "A Rust crate that exposes FFmpeg's power as much as possible."
 keywords = ["ffmpeg", "ffi", "binding", "audio", "video"]
-homepage = "https://github.com/larksuite/rsmpeg"
 documentation = "https://docs.rs/rsmpeg"
 repository = "https://github.com/larksuite/rsmpeg"
-readme = "README.md"
 exclude = ["/.github", "/tests", "/utils"]
-rust-version = "1.81.0"
+license = "MIT"
 
 [dependencies]
 rusty_ffmpeg = { git = "https://github.com/phial3/rusty_ffmpeg.git", branch = "main" }
