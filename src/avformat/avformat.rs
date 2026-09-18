@@ -493,10 +493,10 @@ impl Drop for AVFormatContextOutput {
     fn drop(&mut self) {
         // Here we drop the io context, which won't be touched by
         // avformat_free_context, so let it dangling is safe.
-        if unsafe { *self.oformat }.flags & ffi::AVFMT_NOFILE as i32 == 0 {
-            if let Some(pb) = NonNull::new(self.pb) {
-                let _ = unsafe { AVIOContext::from_raw(pb) };
-            }
+        if unsafe { *self.oformat }.flags & ffi::AVFMT_NOFILE as i32 == 0
+            && let Some(pb) = NonNull::new(self.pb)
+        {
+            let _ = unsafe { AVIOContext::from_raw(pb) };
         }
 
         unsafe {

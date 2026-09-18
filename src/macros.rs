@@ -214,32 +214,60 @@ macro_rules! wrap {
 }
 
 /// Autogen single set function.
+///
+/// Every entry takes optional attributes which are forwarded verbatim to the
+/// generated setter, so doc comments and `#[cfg(...)]` gates are both
+/// supported.
 macro_rules! set_fn {
     ($impl_type:ident {
         $(
+            $(#[$meta:meta])*
             ($fn_name:ident, $property:ident, $property_type:path)
         )+
     }) => {
         impl $impl_type {
-            $(pub fn $fn_name(&mut self, $property: $property_type) {
-                unsafe {
-                    self.deref_mut().$property = $property;
+            $(
+                $(#[$meta])*
+                pub fn $fn_name(&mut self, $property: $property_type) {
+                    unsafe {
+                        self.deref_mut().$property = $property;
+                    }
                 }
-            })+
+            )+
         }
     }
 }
 
 /// Autogen multiple set functions.
+///
+/// Each property may be preceded by attributes. They are attached to the
+/// generated `set_*` method rather than to the field access, which is what
+/// makes doc comments and `#[cfg(...)]` gates work as expected:
+///
+/// ```ignore
+/// settable!(SwsContext {
+///     /// specify which algorithm and options to use for rescaling
+///     flags: u32,
+///     #[cfg(feature = "ffmpeg8")]
+///     threads: i32,
+/// });
+/// ```
+///
+/// A `#[cfg]` gate is inherited by the whole setter, so both the method and
+/// the `deref_mut().field` access inside it disappear together. This keeps a
+/// single `settable!` call site valid on every FFmpeg version, instead of
+/// needing one gated invocation per feature.
 macro_rules! settable {
     ($impl_type:ident {
         $(
+            $(#[$meta:meta])*
             $property:ident : $property_type:path
         ),+ $(,)?
     }) => {
         paste::paste! {
             set_fn!($impl_type {
                 $(
+                    $(#[$meta])*
                     ([<set_ $property>], $property, $property_type)
                 )+
             });

@@ -5,7 +5,30 @@ use crate::{
     shared::*,
 };
 use std::ptr;
+
 wrap!(SwsContext: ffi::SwsContext);
+settable!(SwsContext {
+    src_w: i32,
+    src_h: i32,
+    src_format: ffi::AVPixelFormat,
+    dst_w: i32,
+    dst_h: i32,
+    dst_format: ffi::AVPixelFormat,
+    /// specify which algorithm and options to use for rescaling
+    flags: u32,
+    #[cfg(feature = "ffmpeg8")]
+    threads: i32,
+    #[cfg(feature = "ffmpeg8")]
+    intent: i32,
+    #[cfg(feature = "ffmpeg8")]
+    dither: ffi::SwsDither,
+    #[cfg(feature = "ffmpeg8")]
+    alpha_blend: ffi::SwsAlphaBlend,
+    #[cfg(feature = "ffmpeg9")]
+    scaler: ffi::SwsScaler,
+    #[cfg(feature = "ffmpeg9")]
+    backends: ffi::SwsBackend,
+});
 
 impl SwsContext {
     /// Allocate and return an [`SwsContext`]. You need it to perform
@@ -221,21 +244,6 @@ impl SwsContext {
         Ok(())
     }
 }
-
-#[cfg(feature = "ffmpeg8")]
-settable!(SwsContext {
-    flags: u32,
-    threads: i32,
-    intent: i32,
-    dither: ffi::SwsDither,
-    alpha_blend: ffi::SwsAlphaBlend,
-});
-
-#[cfg(feature = "ffmpeg9")]
-settable!(SwsContext {
-    scaler: ffi::SwsScaler,
-    backends: ffi::SwsBackend,
-});
 
 impl Drop for SwsContext {
     fn drop(&mut self) {
