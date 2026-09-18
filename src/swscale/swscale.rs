@@ -7,6 +7,7 @@ use crate::{
 use std::ptr;
 
 wrap!(SwsContext: ffi::SwsContext);
+#[cfg(feature = "ffmpeg8")]
 settable!(SwsContext {
     src_w: i32,
     src_h: i32,
@@ -16,13 +17,9 @@ settable!(SwsContext {
     dst_format: ffi::AVPixelFormat,
     /// specify which algorithm and options to use for rescaling
     flags: u32,
-    #[cfg(feature = "ffmpeg8")]
     threads: i32,
-    #[cfg(feature = "ffmpeg8")]
     intent: i32,
-    #[cfg(feature = "ffmpeg8")]
     dither: ffi::SwsDither,
-    #[cfg(feature = "ffmpeg8")]
     alpha_blend: ffi::SwsAlphaBlend,
     #[cfg(feature = "ffmpeg9")]
     scaler: ffi::SwsScaler,
