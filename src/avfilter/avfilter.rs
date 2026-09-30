@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    avutil::{AVChannelLayout, AVDictionary, AVFrame},
+    avutil::{AVChannelLayout, AVDictionary, AVFrame, with_copied_options},
     error::{Result, RsmpegError},
     ffi,
     shared::*,
@@ -38,34 +38,14 @@ impl AVFilterContext {
     /// ATTENTION: unlike [`avcodec_open2()`](crate::ffi::avcodec_open2) and
     /// friends (which only take the dictionary over when they succeed),
     /// [`avfilter_init_dict()`](crate::ffi::avfilter_init_dict) **always**
-    /// destroys the dictionary handed to it, failures included. Giving it a
-    /// duplicate keeps that behavior out of our own ownership, and makes the
-    /// failure path behave exactly like the successful one.
+    /// destroys the dictionary handed to it, failures included. It is given a
+    /// duplicate instead, which keeps that out of our own ownership.
     pub fn init_dict(&mut self, options: &mut Option<AVDictionary>) -> Result<()> {
-        let mut options_ptr = match options {
-            Some(dict) => {
-                // `av_dict_copy()` returns a negative AVERROR code on failure,
-                // nothing else has been handed over to libavfilter yet then.
-                let mut copied = ptr::null_mut();
-                unsafe { ffi::av_dict_copy(&mut copied, dict.as_ptr(), 0) }
-                    .upgrade()
-                    .map_err(RsmpegError::AVError)?;
-                copied
-            }
-            None => ptr::null_mut(),
-        };
+        let ret = with_copied_options(options, |options_ptr| unsafe {
+            ffi::avfilter_init_dict(self.as_mut_ptr(), options_ptr)
+        })?;
 
-        let ret = unsafe { ffi::avfilter_init_dict(self.as_mut_ptr(), &mut options_ptr) }.upgrade();
-
-        // The dictionary returned by `avfilter_init_dict()` only holds the
-        // options that were not found, it is owned by us. Note that this also
-        // drops the dictionary given by the caller: the ownership is moved out
-        // of it, not duplicated.
-        *options = options_ptr
-            .upgrade()
-            .map(|x| unsafe { AVDictionary::from_raw(x) });
-
-        ret?;
+        ret.upgrade()?;
 
         Ok(())
     }

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    avutil::{AVDictionary, AVMem},
+    avutil::{AVDictionary, AVMem, with_copied_options},
     error::*,
     ffi,
     shared::*,
@@ -35,7 +35,8 @@ impl AVIOContextURL {
     /// When the resource indicated by url has been opened in read+write mode,
     /// the [`AVIOContextURL`] can be used only for writing.
     ///
-    /// `options` A dictionary filled with protocol-private options.
+    /// `options` A dictionary filled with protocol-private options. After this
+    /// call it holds the options that were not recognized, if any.
     pub fn open(
         url: &CStr,
         flags: u32,
@@ -44,28 +45,22 @@ impl AVIOContextURL {
         let mut io_context = ptr::null_mut();
         let mut dummy_options = None;
         let options = options.unwrap_or(&mut dummy_options);
-        let mut options_ptr = options
-            .as_mut()
-            .map(|x| x.as_mut_ptr())
-            .unwrap_or_else(ptr::null_mut);
 
-        unsafe {
+        // `avio_open2()` reaches `av_opt_set_dict()` with this dictionary, which
+        // frees it as soon as it succeeds — while the connect that follows can
+        // still fail. `with_copied_options()` gives libavformat a duplicate, so
+        // a failure can never leave the caller with a freed dictionary.
+        let ret = with_copied_options(options, |options_ptr| unsafe {
             ffi::avio_open2(
                 &mut io_context,
                 url.as_ptr(),
                 flags as _,
                 ptr::null(),
-                &mut options_ptr,
+                options_ptr,
             )
-        }
-        .upgrade()?;
+        })?;
 
-        // Forget the old options since it's ownership is transferred.
-        let mut new_options = options_ptr
-            .upgrade()
-            .map(|x| unsafe { AVDictionary::from_raw(x) });
-        std::mem::swap(options, &mut new_options);
-        std::mem::forget(new_options);
+        ret.upgrade()?;
 
         Ok(Self(unsafe {
             AVIOContext::from_raw(NonNull::new(io_context).unwrap())
@@ -295,5 +290,31 @@ mod test {
         assert!(inputs.contains(&"file"));
         assert!(inputs.contains(&"http"));
         assert!(inputs.contains(&"async"));
+    }
+
+    /// `ffurl_open_whitelist()` hands the caller's dictionary straight to
+    /// `av_opt_set_dict()`, which frees it as soon as it succeeds — and several
+    /// failure points follow that (the whitelist entries, the connect itself).
+    /// Opening an unreachable resource must therefore still leave `options`
+    /// holding valid memory: it used to leave a dangling dictionary, which
+    /// aborted with SIGSEGV as soon as it was dropped.
+    #[test]
+    fn test_open_failure_leaves_options_usable() {
+        let mut options = Some(AVDictionary::new(c"rsmpeg_not_an_option", c"1", 0));
+
+        let result = AVIOContextURL::open(
+            c"/definitely/not/a/real/path/rsmpeg_open_failure_test",
+            0,
+            Some(&mut options),
+        );
+        assert!(result.is_err(), "opening a missing path must fail");
+        drop(result);
+
+        // Reading the dictionary and then dropping it is the guard itself:
+        // both used to touch memory libavformat had already released.
+        if let Some(options) = options.as_ref() {
+            let _ = options.iter().count();
+        }
+        let _ = options.take();
     }
 }

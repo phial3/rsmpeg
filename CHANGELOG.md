@@ -4,6 +4,33 @@
   dictionary even when it fails, which used to free it a second time on the
   error path (a copy is handed to libavfilter now)
 
+- Fix `AVIOContextURL::open()`: `ffurl_open_whitelist()` hands the dictionary to
+  `av_opt_set_dict()`, which frees it as soon as it succeeds, and the connect
+  that follows can still fail. The failure path used to leave `options` holding
+  a dictionary libavformat had already released, which aborted with SIGSEGV when
+  it was dropped (a copy is handed to libavformat now)
+
+- Fix `AVDictionary::new()`, `new_int()`, `set()`, `set_int()` and `copy()`,
+  which forwarded the `AV_DICT_DONT_STRDUP_KEY` / `AV_DICT_DONT_STRDUP_VAL` flags
+  straight to libavutil. They hand the ownership of the key and value pointers
+  over, but those come from `&CStr`s borrowed for the duration of the call, so
+  the dictionary ended up referencing — and `av_free()`ing — memory its caller
+  still owned, a use-after-free followed by a double free. The flags are masked
+  out now, which is what `av_dict_parse_string()` does with them itself
+
+- Fix `AVDictionary::from_string()`: a string holding no pairs parses
+  successfully without producing a dictionary, which used to panic instead of
+  returning `None`
+
+- Add `AVDictionary::insert()`, `insert_int()`, `contains_key()`, `get_value()`,
+  `get_int()`, `len()` and `Extend<(&CStr, &CStr)>`, so a dictionary can be
+  modified and inspected in place instead of only through the consuming
+  `set()` and the cursor-based `get()`
+
+- Document `AVDictionary::from_string()`, which had no documentation (its doc
+  comment started with `//`), and drop four write-backs in `AVDictionary` that
+  could never do anything
+
 - Fix `AVCodecParserContext::parse_packet()`: add the
   `AV_INPUT_BUFFER_PADDING_SIZE` padding `av_parser_parse2()` expects, and give
   the packet its own copy of the parsed data (it used to alias the input slice

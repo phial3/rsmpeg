@@ -9,7 +9,7 @@ use crate::{
         AVCodecParameters, AVCodecParametersMut, AVCodecParametersRef, AVCodecRef, AVPacket,
     },
     avformat::{AVIOContext, AVIOContextCustom, AVIOContextURL},
-    avutil::{AVDictionary, AVDictionaryMut, AVDictionaryRef, AVRational},
+    avutil::{AVDictionary, AVDictionaryMut, AVDictionaryRef, AVRational, with_copied_options},
     error::{Result, RsmpegError},
     ffi,
     shared::*,
@@ -88,28 +88,16 @@ impl AVFormatContextInput {
 
         let mut dummy_options = None;
         let options = options.unwrap_or(&mut dummy_options);
-        let mut options_ptr = options
-            .as_mut()
-            .map(|x| x.as_mut_ptr())
-            .unwrap_or_else(std::ptr::null_mut);
 
-        unsafe {
-            ffi::avformat_open_input(
-                &mut input_format_context,
-                url_ptr,
-                fmt_ptr,
-                &mut options_ptr,
-            )
-        }
-        .upgrade()
-        .map_err(RsmpegError::OpenInputError)?;
+        // `avformat_open_input()` hands this dictionary to `av_opt_set_dict()`,
+        // which frees it, and only puts the leftovers back on the success
+        // return. `with_copied_options()` gives libavformat a duplicate, so the
+        // caller's dictionary always stays ours to release.
+        let ret = with_copied_options(options, |options_ptr| unsafe {
+            ffi::avformat_open_input(&mut input_format_context, url_ptr, fmt_ptr, options_ptr)
+        })?;
 
-        // Forget the old options since it's ownership is transferred.
-        let mut new_options = options_ptr
-            .upgrade()
-            .map(|x| unsafe { AVDictionary::from_raw(x) });
-        std::mem::swap(options, &mut new_options);
-        std::mem::forget(new_options);
+        ret.upgrade().map_err(RsmpegError::OpenInputError)?;
 
         // Here we can be sure that context is non null, constructing here for
         // dropping when `avformat_find_stream_info` fails.
@@ -721,5 +709,53 @@ mod test {
         assert!(!outputs.is_empty());
         assert!(outputs.contains(&"mpeg".to_string()));
         assert!(outputs.contains(&"asf".to_string()));
+    }
+
+    /// After a successful open, `options` holds the options FFmpeg did not
+    /// recognize, and the dictionary the caller passed in has been released
+    /// rather than leaked or freed twice.
+    #[test]
+    fn test_open_reports_unused_options() {
+        let mut options = Some(AVDictionary::new(c"rsmpeg_not_an_option", c"1", 0).set(
+            c"probesize",
+            c"5000000",
+            0,
+        ));
+
+        let _context = AVFormatContextInput::builder()
+            .url(c"tests/assets/vids/centaur.mpg")
+            .options(&mut options)
+            .open()
+            .unwrap();
+
+        let unused = options
+            .as_ref()
+            .map(|dict| {
+                dict.iter()
+                    .map(|entry| entry.key().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        assert_eq!(unused, ["rsmpeg_not_an_option"]);
+    }
+
+    /// A failed open has to leave `options` holding valid memory. The
+    /// dictionary is copied rather than handed to libavformat, so the failure
+    /// path can never return a dictionary libavformat already released.
+    #[test]
+    fn test_open_failure_leaves_options_usable() {
+        let mut options = Some(AVDictionary::new(c"rsmpeg_not_an_option", c"1", 0));
+
+        let result = AVFormatContextInput::builder()
+            .url(c"/definitely/not/a/real/path/rsmpeg_open_failure_test")
+            .options(&mut options)
+            .open();
+        assert!(result.is_err(), "opening a missing path must fail");
+
+        // Reading the dictionary and then dropping it is the guard itself.
+        if let Some(options) = options.as_ref() {
+            let _ = options.iter().count();
+        }
+        let _ = options.take();
     }
 }
