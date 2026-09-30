@@ -9,6 +9,15 @@
   the packet its own copy of the parsed data (it used to alias the input slice
   or the parser's internal buffer, both of which die before the packet does)
 
+- Fix `AVChannelLayout::describe()` on FFmpeg `6.*`, where
+  `av_channel_layout_describe()` doesn't count the terminating null character
+  (the last character of the description used to be cut off)
+
+- Fix `AVBufferPool`'s alignment test: it asserted a 32-byte alignment as the
+  portable bound `av_malloc()` guarantees, but that bound is 16 bytes —
+  `ALIGN` in `libavutil/mem.c` is `HAVE_SIMD_ALIGN_64 ? 64 : (HAVE_SIMD_ALIGN_32 ? 32 : 16)`,
+  so builds without 32-byte SIMD alignment (Linux aarch64) fail it
+
 ## 0.17.0
 
 - Add builder pattern for `AVFormatContextInput` and `AVFormatContextOutput` (#225, #226)

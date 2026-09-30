@@ -119,30 +119,28 @@ impl AVChannelLayout {
         const BUF_SIZE: usize = 32;
         let mut buf = vec![0u8; BUF_SIZE];
 
-        // # Safety: `as usize` after upgrading, len is assumed to be positive.
-        let len = unsafe {
-            ffi::av_channel_layout_describe(
-                self.as_ptr(),
-                buf.as_mut_ptr() as *mut std::ffi::c_char,
-                BUF_SIZE,
-            )
-        }
-        .upgrade()? as usize;
-
-        let len = if len > BUF_SIZE {
-            buf.resize(len, 0);
-            unsafe {
+        loop {
+            let len = unsafe {
                 ffi::av_channel_layout_describe(
                     self.as_ptr(),
                     buf.as_mut_ptr() as *mut std::ffi::c_char,
-                    len,
+                    buf.len(),
                 )
             }
-            .upgrade()? as usize
-        } else {
-            len
-        };
-        Ok(CString::new(&buf[..len - 1]).unwrap())
+            .upgrade()? as usize;
+
+            // FFmpeg <= 6.0 returns here the length of the string *excluding*
+            // its terminating null character, while FFmpeg >= 6.1 accounts for
+            // it(fixed in https://github.com/FFmpeg/FFmpeg/commit/c4f35ba8084f254afe1fb05202abfdcfff63b854).
+            // Instead of relying on either convention, retry with a bigger
+            // buffer until the null terminator provably fits inside `buf`.
+            if len < buf.len() {
+                let c_str = unsafe { CStr::from_ptr(buf.as_ptr() as *const std::ffi::c_char) };
+                return Ok(c_str.to_owned());
+            }
+
+            buf.resize(len + 1, 0);
+        }
     }
 
     /// Get the channel with the given index in a channel layout.
@@ -246,5 +244,20 @@ mod tests {
             assert!(!item.describe().unwrap().to_str().unwrap().is_empty())
         }
         assert_eq!(item.describe().unwrap().to_str().unwrap(), "22.2");
+    }
+
+    /// A description longer than the initial buffer exercises the retry path of
+    /// [`AVChannelLayout::describe()`].
+    #[test]
+    fn describe_long_layout_test() {
+        let layout = AVChannelLayout::from_string(
+            c"FL+FR+FC+LFE+BL+BR+FLC+FRC+BC+SL+SR+TC+TFL+TFC+TFR+TBL+TBC+TBR",
+        )
+        .unwrap();
+        assert_eq!(
+            layout.describe().unwrap().to_str().unwrap(),
+            // Way longer than the 32 bytes buffer `describe()` starts with.
+            "18 channels (FL+FR+FC+LFE+BL+BR+FLC+FRC+BC+SL+SR+TC+TFL+TFC+TFR+TBL+TBC+TBR)"
+        );
     }
 }

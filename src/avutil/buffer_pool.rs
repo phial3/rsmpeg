@@ -170,16 +170,28 @@ mod tests {
         assert_ne!(a.data, c.data);
     }
 
-    /// Buffer data pointers are aligned to at least 32 bytes — the portable
-    /// lower bound guaranteed by `av_malloc` (many platforms provide 64).
-    /// Plane layout via `av_image_fill_arrays` and SIMD consumers rely on
-    /// this.
+    /// Buffer data pointers keep the alignment `av_malloc()` promises.
+    ///
+    /// `av_buffer_pool` hands out `av_buffer_allocz()` buffers, which go
+    /// through `av_mallocz()` → `av_malloc()`. That allocates with `ALIGN`,
+    /// which `libavutil/mem.c` defines as
+    /// `HAVE_SIMD_ALIGN_64 ? 64 : (HAVE_SIMD_ALIGN_32 ? 32 : 16)`.
+    ///
+    /// Only the portable floor can be asserted here: 32/64 depend on how the
+    /// linked FFmpeg was configured, and a build without 32-byte SIMD
+    /// alignment really does return 16-byte aligned memory (Linux aarch64 is
+    /// one such build). Plane layout via `av_image_fill_arrays` and SIMD
+    /// consumers rely on getting at least this much.
     #[test]
     fn buffer_data_is_aligned() {
+        // The floor `av_malloc()` guarantees on every platform FFmpeg
+        // supports, see the note above.
+        const AV_MALLOC_MIN_ALIGN: usize = 16;
+
         let mut pool = AVBufferPool::new(1024).unwrap();
         for _ in 0..8 {
             let buffer = pool.get().unwrap();
-            assert_eq!(buffer.data as usize % 32, 0);
+            assert_eq!(buffer.data as usize % AV_MALLOC_MIN_ALIGN, 0);
         }
     }
 
