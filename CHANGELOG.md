@@ -4,6 +4,11 @@
   dictionary even when it fails, which used to free it a second time on the
   error path (a copy is handed to libavfilter now)
 
+- Fix `AVCodecParserContext::parse_packet()`: add the
+  `AV_INPUT_BUFFER_PADDING_SIZE` padding `av_parser_parse2()` expects, and give
+  the packet its own copy of the parsed data (it used to alias the input slice
+  or the parser's internal buffer, both of which die before the packet does)
+
 ## 0.17.0
 
 - Add builder pattern for `AVFormatContextInput` and `AVFormatContextOutput` (#225, #226)
