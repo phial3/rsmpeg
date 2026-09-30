@@ -1,3 +1,9 @@
+## Unreleased
+
+- Fix `AVFilterContext::init_dict()`: `avfilter_init_dict()` destroys the given
+  dictionary even when it fails, which used to free it a second time on the
+  error path (a copy is handed to libavfilter now)
+
 ## 0.17.0
 
 - Add builder pattern for `AVFormatContextInput` and `AVFormatContextOutput` (#225, #226)

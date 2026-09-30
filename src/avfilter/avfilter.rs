@@ -31,20 +31,41 @@ wrap_mut!(AVFilterContext: ffi::AVFilterContext);
 
 impl AVFilterContext {
     /// Initialize a filter with the supplied dictionary of options.
+    ///
+    /// The given dictionary always contains the options that were not found
+    /// after this call (whatever the result is).
+    ///
+    /// ATTENTION: unlike [`avcodec_open2()`](crate::ffi::avcodec_open2) and
+    /// friends (which only take the dictionary over when they succeed),
+    /// [`avfilter_init_dict()`](crate::ffi::avfilter_init_dict) **always**
+    /// destroys the dictionary handed to it, failures included. Giving it a
+    /// duplicate keeps that behavior out of our own ownership, and makes the
+    /// failure path behave exactly like the successful one.
     pub fn init_dict(&mut self, options: &mut Option<AVDictionary>) -> Result<()> {
-        let mut options_ptr = options
-            .as_mut()
-            .map(|x| x.as_mut_ptr())
-            .unwrap_or_else(std::ptr::null_mut);
+        let mut options_ptr = match options {
+            Some(dict) => {
+                // `av_dict_copy()` returns a negative AVERROR code on failure,
+                // nothing else has been handed over to libavfilter yet then.
+                let mut copied = ptr::null_mut();
+                unsafe { ffi::av_dict_copy(&mut copied, dict.as_ptr(), 0) }
+                    .upgrade()
+                    .map_err(RsmpegError::AVError)?;
+                copied
+            }
+            None => ptr::null_mut(),
+        };
 
-        unsafe { ffi::avfilter_init_dict(self.as_mut_ptr(), &mut options_ptr) }.upgrade()?;
+        let ret = unsafe { ffi::avfilter_init_dict(self.as_mut_ptr(), &mut options_ptr) }.upgrade();
 
-        // Forget the old options since it's ownership is transferred.
-        let mut new_options = options_ptr
+        // The dictionary returned by `avfilter_init_dict()` only holds the
+        // options that were not found, it is owned by us. Note that this also
+        // drops the dictionary given by the caller: the ownership is moved out
+        // of it, not duplicated.
+        *options = options_ptr
             .upgrade()
             .map(|x| unsafe { AVDictionary::from_raw(x) });
-        std::mem::swap(options, &mut new_options);
-        new_options.map(|x| x.into_raw());
+
+        ret?;
 
         Ok(())
     }
@@ -448,5 +469,68 @@ impl Drop for AVFilterGraph {
         unsafe {
             ffi::avfilter_graph_free(&mut filter_graph);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::avutil::AVDictionary;
+
+    /// An [`AVFilterGraph`] owning a filter context created from given filter
+    /// name, `None` when the filter isn't available in current FFmpeg build.
+    fn buffer_filter_context(graph: &AVFilterGraph) -> Option<AVFilterContextMut<'_>> {
+        let filter = AVFilter::get_by_name(c"buffer")?;
+        graph.alloc_filter_context(&filter, c"buffer_src")
+    }
+
+    /// `avfilter_init_dict()` takes the given dictionary over even when it
+    /// fails, forgetting it twice frees it twice.
+    #[test]
+    fn test_init_dict_failure_takes_over_options() {
+        let graph = AVFilterGraph::new();
+        let Some(mut context) = buffer_filter_context(&graph) else {
+            println!("skip: buffer filter is not available");
+            return;
+        };
+
+        // `buffer` requires width, height, pix_fmt and time_base, so these
+        // incomplete options make the initialization fail.
+        let mut options = Some(AVDictionary::new(c"width", c"320", 0).set(c"height", c"240", 0));
+        assert!(context.init_dict(&mut options).is_err());
+
+        // The dictionary is unusable since then, but dropping it here must not
+        // touch the memory libavfilter has already freed, and the same goes for
+        // what `init_dict()` put back in place of it.
+        let _ = options.take();
+    }
+
+    /// On success, the options that were consumed disappear from the dictionary
+    /// and the ones that weren't are reported back to the caller.
+    #[test]
+    fn test_init_dict_reports_unused_options() {
+        let graph = AVFilterGraph::new();
+        let Some(mut context) = buffer_filter_context(&graph) else {
+            println!("skip: buffer filter is not available");
+            return;
+        };
+
+        let mut options = Some(
+            AVDictionary::new(c"time_base", c"1/25", 0)
+                .set(c"pix_fmt", c"yuv420p", 0)
+                .set(c"width", c"320", 0)
+                .set(c"unknown_option_of_rsmpeg", c"42", 0)
+                .set(c"height", c"240", 0),
+        );
+        context.init_dict(&mut options).unwrap();
+
+        // The recognized options are consumed, the rest is left for the caller.
+        let options = options.unwrap();
+        let mut unused: Vec<String> = options
+            .iter()
+            .map(|entry| entry.key().to_string_lossy().into_owned())
+            .collect();
+        unused.sort_unstable();
+        assert_eq!(unused, ["unknown_option_of_rsmpeg"]);
     }
 }
