@@ -18,6 +18,11 @@
   `ALIGN` in `libavutil/mem.c` is `HAVE_SIMD_ALIGN_64 ? 64 : (HAVE_SIMD_ALIGN_32 ? 32 : 16)`,
   so builds without 32-byte SIMD alignment (Linux aarch64) fail it
 
+- Test every supported FFmpeg version on macOS, and drop the `1.89.0` toolchain
+  from CI in favour of `1.90.0`
+
+- Bump MSRV to `1.89.0`
+
 ## 0.17.0
 
 - Add builder pattern for `AVFormatContextInput` and `AVFormatContextOutput` (#225, #226)

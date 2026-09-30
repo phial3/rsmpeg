@@ -13,7 +13,7 @@ Taking advantage of Rust's language design, you can build robust multi-media pro
 
 Supported FFmpeg versions are `6.*`, `7.*`, `8.*` and `9.*`.
 
-Minimum Supported Rust Version is `1.85.0`(stable channel, edition 2024).
+Minimum Supported Rust Version is `1.89.0`(stable channel, edition 2024).
 
 ## Getting started
 
