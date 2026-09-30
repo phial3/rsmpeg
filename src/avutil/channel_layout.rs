@@ -51,15 +51,21 @@ impl Clone for AVChannelLayout {
 }
 
 impl AVChannelLayout {
-    /// Convert self into [`ffi::AVChannelLayout`]`.
+    /// Convert self into a raw [`ffi::AVChannelLayout`].
     ///
-    /// Be careful when using it. Since this fucntion leaks the raw type,
-    /// you have to manually do `ffi::av_channel_layout_uninit``.
-    pub fn into_inner(mut self) -> ffi::AVChannelLayout {
-        let layout = self.as_mut_ptr();
-        let layout = *unsafe { Box::from_raw(layout) };
-        std::mem::forget(self);
-        layout
+    /// The layout is handed over without being released, so the caller becomes
+    /// responsible for it: either call `av_channel_layout_uninit()` on the
+    /// result once done with it, or pass it to an FFI call that takes it over
+    /// (like [`AVCodecContext::set_ch_layout()`](crate::avcodec::AVCodecContext::set_ch_layout)).
+    pub fn into_inner(self) -> ffi::AVChannelLayout {
+        // `ManuallyDrop` is what `mem::forget` used to say here: the wrapper's
+        // `Drop` must not `av_channel_layout_uninit()` a layout that is being
+        // handed to the caller.
+        let mut this = std::mem::ManuallyDrop::new(self);
+        // The wrapper keeps its layout in a `Box` so the `NonNull` it stores has
+        // a stable address. Taking that allocation back moves the value out and
+        // frees it in the same step.
+        *unsafe { Box::from_raw(this.as_mut_ptr()) }
     }
 
     /// Initialize a native channel layout from a bitmask indicating which channels are present.

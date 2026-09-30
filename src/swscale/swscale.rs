@@ -251,21 +251,20 @@ impl Drop for SwsContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffi::{AV_PIX_FMT_RGB24, SWS_BICUBIC, SWS_FULL_CHR_H_INT, SWS_PARAM_DEFAULT};
 
     #[test]
     fn test_cached_sws_context() {
         let context = SwsContext::get_context(
             10,
             10,
-            AV_PIX_FMT_RGB24,
+            ffi::AV_PIX_FMT_RGB24,
             10,
             10,
-            AV_PIX_FMT_RGB24,
-            (SWS_FULL_CHR_H_INT | SWS_BICUBIC) as u32,
+            ffi::AV_PIX_FMT_RGB24,
+            (ffi::SWS_FULL_CHR_H_INT | ffi::SWS_BICUBIC) as _,
             None,
             None,
-            Some(&[SWS_PARAM_DEFAULT as f64, SWS_PARAM_DEFAULT as f64]),
+            Some(&[ffi::SWS_PARAM_DEFAULT as f64, ffi::SWS_PARAM_DEFAULT as f64]),
         )
         .unwrap();
         let old_ptr = context.as_ptr();
@@ -273,11 +272,11 @@ mod tests {
             .get_cached_context(
                 10,
                 10,
-                AV_PIX_FMT_RGB24,
+                ffi::AV_PIX_FMT_RGB24,
                 10,
                 10,
-                AV_PIX_FMT_RGB24,
-                (SWS_FULL_CHR_H_INT | SWS_BICUBIC) as u32,
+                ffi::AV_PIX_FMT_RGB24,
+                (ffi::SWS_FULL_CHR_H_INT | ffi::SWS_BICUBIC) as _,
                 None,
                 None,
                 None,
@@ -300,21 +299,21 @@ mod tests {
         let mut src = AVFrame::new();
         src.data_mut().clone_from(src_img.data());
         src.linesize_mut().clone_from(src_img.linesizes());
-        src.set_format(ffi::AV_PIX_FMT_YUV420P as i32);
+        src.set_format(ffi::AV_PIX_FMT_YUV420P as _);
         src.set_width(64);
         src.set_height(64);
 
         let mut dst = AVFrame::new();
         dst.set_width(32);
         dst.set_height(32);
-        dst.set_format(ffi::AV_PIX_FMT_RGB24 as i32);
+        dst.set_format(ffi::AV_PIX_FMT_RGB24 as _);
 
         let mut context = SwsContext::alloc().unwrap();
         context.scale_full_frame(&mut dst, &src).unwrap();
 
         assert_eq!(dst.width, 32);
         assert_eq!(dst.height, 32);
-        assert_eq!(dst.format, ffi::AV_PIX_FMT_RGB24 as i32);
+        assert_eq!(dst.format, ffi::AV_PIX_FMT_RGB24 as _);
         assert!(!dst.data[0].is_null());
         assert!(dst.linesize[0] >= 32 * 3);
     }
@@ -332,17 +331,17 @@ mod tests {
         let mut src = AVFrame::new();
         src.data_mut().clone_from(src_img.data());
         src.linesize_mut().clone_from(src_img.linesizes());
-        src.set_format(ffi::AV_PIX_FMT_YUV420P as i32);
+        src.set_format(ffi::AV_PIX_FMT_YUV420P as _);
         src.set_width(64);
         src.set_height(64);
 
         let mut dst = AVFrame::new();
         dst.set_width(32);
         dst.set_height(32);
-        dst.set_format(ffi::AV_PIX_FMT_RGB24 as i32);
+        dst.set_format(ffi::AV_PIX_FMT_RGB24 as _);
 
         let mut context = SwsContext::alloc().unwrap();
-        context.set_flags((SWS_ACCURATE_RND | SWS_BITEXACT | ffi::SWS_BICUBIC) as u32);
+        context.set_flags((SWS_ACCURATE_RND | SWS_BITEXACT | ffi::SWS_BICUBIC) as _);
         context.set_threads(0);
         context.set_dither(SWS_DITHER_AUTO);
         #[cfg(feature = "ffmpeg9")]

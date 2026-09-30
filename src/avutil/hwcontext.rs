@@ -278,8 +278,7 @@ mod tests {
 
     #[test]
     fn test_hw_device_iterate_types() {
-        let mut iter = hwdevice_iterate_types();
-        while let Some(device_type) = iter.next() {
+        for device_type in hwdevice_iterate_types() {
             dbg!(hwdevice_get_type_name(device_type).unwrap());
             assert_ne!(device_type, ffi::AV_HWDEVICE_TYPE_NONE);
         }
